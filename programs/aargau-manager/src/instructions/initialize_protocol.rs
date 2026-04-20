@@ -1,7 +1,5 @@
 use crate::{
-    constants::PROGRAM_VERSION,
-    errors::AargauError,
-    events::ProtocolInitialized,
+    constants::PROGRAM_VERSION, errors::AargauError, events::ProtocolInitialized,
     state::ProtocolConfig,
 };
 use anchor_lang::prelude::*;

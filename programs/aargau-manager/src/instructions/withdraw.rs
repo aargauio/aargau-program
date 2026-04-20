@@ -90,8 +90,14 @@ pub fn handler(ctx: Context<Withdraw>, params: WithdrawParams) -> Result<()> {
     let amount_a = proportional_amount(ctx.accounts.vault_token_a.amount, params.pct_bps)?;
     let amount_b = proportional_amount(ctx.accounts.vault_token_b.amount, params.pct_bps)?;
 
-    require!(amount_a >= params.min_amount_a, AargauError::SlippageExceeded);
-    require!(amount_b >= params.min_amount_b, AargauError::SlippageExceeded);
+    require!(
+        amount_a >= params.min_amount_a,
+        AargauError::SlippageExceeded
+    );
+    require!(
+        amount_b >= params.min_amount_b,
+        AargauError::SlippageExceeded
+    );
 
     // PDA signer seeds — built via shared utility to keep seed construction
     // in one place across all instructions.

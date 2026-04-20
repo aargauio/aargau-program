@@ -1,4 +1,8 @@
-use crate::{errors::AargauError, events::DepositMade, state::{ProtocolConfig, VaultAccount}};
+use crate::{
+    errors::AargauError,
+    events::DepositMade,
+    state::{ProtocolConfig, VaultAccount},
+};
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};
 

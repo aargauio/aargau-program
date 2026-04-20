@@ -62,22 +62,19 @@ mod program_id_tests {
 
     #[test]
     fn test_orca_whirlpool_program_id_string() {
-        let expected =
-            Pubkey::from_str("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc").unwrap();
+        let expected = Pubkey::from_str("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc").unwrap();
         assert_eq!(ORCA_WHIRLPOOL_PROGRAM_ID, expected);
     }
 
     #[test]
     fn test_raydium_clmm_program_id_string() {
-        let expected =
-            Pubkey::from_str("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK").unwrap();
+        let expected = Pubkey::from_str("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK").unwrap();
         assert_eq!(RAYDIUM_CLMM_PROGRAM_ID, expected);
     }
 
     #[test]
     fn test_meteora_dlmm_program_id_string() {
-        let expected =
-            Pubkey::from_str("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo").unwrap();
+        let expected = Pubkey::from_str("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo").unwrap();
         assert_eq!(METEORA_DLMM_PROGRAM_ID, expected);
     }
 
@@ -127,9 +124,15 @@ mod discriminator_tests {
 
     #[test]
     fn test_all_discriminators_are_distinct() {
-        assert_ne!(ORCA_WHIRLPOOL_DISCRIMINATOR, RAYDIUM_POOL_STATE_DISCRIMINATOR);
+        assert_ne!(
+            ORCA_WHIRLPOOL_DISCRIMINATOR,
+            RAYDIUM_POOL_STATE_DISCRIMINATOR
+        );
         assert_ne!(ORCA_WHIRLPOOL_DISCRIMINATOR, METEORA_LB_PAIR_DISCRIMINATOR);
-        assert_ne!(RAYDIUM_POOL_STATE_DISCRIMINATOR, METEORA_LB_PAIR_DISCRIMINATOR);
+        assert_ne!(
+            RAYDIUM_POOL_STATE_DISCRIMINATOR,
+            METEORA_LB_PAIR_DISCRIMINATOR
+        );
     }
 }
 

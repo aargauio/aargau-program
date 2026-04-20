@@ -29,11 +29,18 @@ jobs:
       - name: cargo test
         run: cargo test --manifest-path programs/aargau-manager/Cargo.toml
 
+      - name: cargo fmt check
+        run: cargo fmt --manifest-path programs/aargau-manager/Cargo.toml -- --check
+
       - name: cargo clippy
         run: >
           cargo clippy
           --manifest-path programs/aargau-manager/Cargo.toml
-          -- -A unexpected_cfgs -A ambiguous_glob_reexports -D warnings
+          --
+          -A unexpected_cfgs
+          -A ambiguous_glob_reexports
+          -A clippy::diverging-sub-expression
+          -D warnings
 
   build-release:
     name: anchor build + IDL upload

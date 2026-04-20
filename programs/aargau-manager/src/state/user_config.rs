@@ -5,11 +5,11 @@ use anchor_lang::prelude::*;
 #[account]
 #[derive(Debug)]
 pub struct UserConfig {
-    pub user_authority: Pubkey,    // 32
+    pub user_authority: Pubkey,      // 32
     pub notifications_enabled: bool, // 1
-    pub bump: u8,                  // 1
-    pub _padding: [u8; 8],         // 8
-                                   // Data: 42 bytes
+    pub bump: u8,                    // 1
+    pub _padding: [u8; 8],           // 8
+                                     // Data: 42 bytes
 }
 
 impl UserConfig {

@@ -1,7 +1,5 @@
 use crate::{
-    errors::AargauError,
-    events::EmergencyWithdraw as EmergencyWithdrawEvent,
-    state::VaultAccount,
+    errors::AargauError, events::EmergencyWithdraw as EmergencyWithdrawEvent, state::VaultAccount,
     utils::signer_seeds::vault_signer_seeds,
 };
 use anchor_lang::prelude::*;

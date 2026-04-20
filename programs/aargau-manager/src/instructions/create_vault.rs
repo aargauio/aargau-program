@@ -82,7 +82,12 @@ pub fn handler(ctx: Context<CreateVault>, params: CreateVaultParams) -> Result<(
         AargauError::InvalidPoolMint
     );
 
-    validate_pool(&ctx.accounts.pool, &ctx.accounts.mint_a, &ctx.accounts.mint_b, params.protocol)?;
+    validate_pool(
+        &ctx.accounts.pool,
+        &ctx.accounts.mint_a,
+        &ctx.accounts.mint_b,
+        params.protocol,
+    )?;
     validate_meteora_bin_count(&params)?;
 
     let uses_token_2022 = detect_token_2022(&ctx.accounts.mint_a, &ctx.accounts.mint_b);
@@ -150,10 +155,7 @@ fn validate_meteora_bin_count(params: &CreateVaultParams) -> Result<()> {
 }
 
 /// Return true if either mint lives under the Token-2022 program.
-fn detect_token_2022(
-    mint_a: &InterfaceAccount<Mint>,
-    mint_b: &InterfaceAccount<Mint>,
-) -> bool {
+fn detect_token_2022(mint_a: &InterfaceAccount<Mint>, mint_b: &InterfaceAccount<Mint>) -> bool {
     let token_2022_id = anchor_spl::token_2022::ID;
     mint_a.to_account_info().owner == &token_2022_id
         || mint_b.to_account_info().owner == &token_2022_id
