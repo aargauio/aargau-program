@@ -24,7 +24,8 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: cargo audit
-        run: cargo audit --manifest-path programs/aargau-manager/Cargo.toml
+        run: cargo audit
+        working-directory: aargau-program
 
       - name: cargo test
         run: cargo test --manifest-path programs/aargau-manager/Cargo.toml
