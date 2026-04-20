@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      suffix:
+        description: "Optional tag suffix (e.g. localnet, devnet, audit, mainnet)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Bump version and tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.94.1"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aargau-program
+
+      - name: Compute new version
+        id: version
+        run: |
+          CURRENT=$(grep '^version = ' programs/aargau-manager/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+          MINOR=$(echo "$CURRENT" | cut -d. -f2)
+          PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+          case "${{ inputs.bump }}" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH+1)) ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          PROGRAM_VERSION=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+
+          if [ -n "${{ inputs.suffix }}" ]; then
+            TAG="v${NEW_VERSION}-${{ inputs.suffix }}"
+          else
+            TAG="v${NEW_VERSION}"
+          fi
+
+          echo "current=${CURRENT}"            >> "$GITHUB_OUTPUT"
+          echo "new_version=${NEW_VERSION}"    >> "$GITHUB_OUTPUT"
+          echo "program_version=${PROGRAM_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"                    >> "$GITHUB_OUTPUT"
+
+      - name: Update Cargo.toml version
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ steps.version.outputs.new_version }}\"/" \
+            programs/aargau-manager/Cargo.toml
+
+      - name: Update PROGRAM_VERSION in constants.rs
+        run: |
+          sed -i "s/^pub const PROGRAM_VERSION: u32 = [0-9]*;/pub const PROGRAM_VERSION: u32 = ${{ steps.version.outputs.program_version }};/" \
+            programs/aargau-manager/src/constants.rs
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: cargo audit
+        run: cargo audit --manifest-path programs/aargau-manager/Cargo.toml
+
+      - name: cargo test
+        run: cargo test --manifest-path programs/aargau-manager/Cargo.toml
+
+      - name: Commit version bump
+        run: |
+          git add programs/aargau-manager/Cargo.toml \
+                  programs/aargau-manager/src/constants.rs
+          git commit -m "chore: bump version to v${{ steps.version.outputs.new_version }}"
+
+      - name: Create and push tag
+        run: |
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin HEAD "${{ steps.version.outputs.tag }}"

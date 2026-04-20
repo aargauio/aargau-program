@@ -1,0 +1,35 @@
+# Build artifacts
+target/
+**/*.rs.bk
+
+# Anchor build outputs
+.anchor/
+programs/**/.so
+programs/**/keypair.json
+
+# Solana keypairs (never commit)
+**/*-keypair.json
+deploy-keypair.json
+wallet.json
+
+# IDL (generated — commit only if publishing on-chain)
+# Uncomment to ignore: target/idl/
+
+# Node / TypeScript client (if added later)
+node_modules/
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Internal agent instructions
+CLAUDE.md
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store

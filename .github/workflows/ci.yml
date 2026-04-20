@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: cargo test + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.94.1"
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aargau-program
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: cargo audit
+        run: cargo audit --manifest-path programs/aargau-manager/Cargo.toml
+
+      - name: cargo test
+        run: cargo test --manifest-path programs/aargau-manager/Cargo.toml
+
+      - name: cargo clippy
+        run: >
+          cargo clippy
+          --manifest-path programs/aargau-manager/Cargo.toml
+          -- -A unexpected_cfgs -A ambiguous_glob_reexports -D warnings
+
+  build-release:
+    name: anchor build + IDL upload
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.94.1"
+
+      - name: Install Solana CLI
+        run: sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+
+      - name: cargo test
+        run: cargo test --manifest-path programs/aargau-manager/Cargo.toml
+
+      - name: anchor build
+        run: cd aargau-program && anchor build
+
+      - name: Upload IDL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aargau-manager-idl-${{ github.ref_name }}
+          path: aargau-program/target/idl/aargau_manager.json

@@ -1,0 +1,13 @@
+[workspace]
+members = ["programs/aargau-manager"]
+resolver = "2"
+
+[workspace.dependencies]
+anchor-lang = { version = "1.0.0" }
+anchor-spl  = { version = "1.0.0", features = ["token", "token_2022"] }
+solana-program = "4.0.0"
+
+[profile.release]
+overflow-checks = true
+lto = "thin"
+opt-level = "z"
