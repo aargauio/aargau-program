@@ -61,7 +61,12 @@ programs/aargau-manager/src/
 │   ├── protocol_config.rs  # ProtocolConfig (112 bytes) singleton
 │   └── user_config.rs      # UserConfig (reserved for future use)
 ├── instructions/
-│   └── [17 instruction files]
+│   ├── admin/          # initialize_protocol, set_protocol_pause, update_protocol_config,
+│   │                   # withdraw_treasury, transfer_admin, admin_emergency_transfer
+│   ├── vault/          # create_vault, deposit, withdraw, emergency_withdraw, close_vault,
+│   │                   # claim_rewards, manual_rebalance, cancel_pending_rebalance,
+│   │                   # retry_pending_rebalance
+│   └── keeper/         # execute_action, report_rebalance_attempt
 └── utils/
     ├── fee.rs              # calc_aargau_fee, calc_net_after_transfer_fee
     ├── pool_validation.rs  # 4-layer pool validation
