@@ -509,6 +509,7 @@ fn vault_signer_seed_bytes(vault: &VaultAccount) -> VaultSignerSeedBytes {
 /// Transfer `amount` of `mint` from the vault ATA to the treasury ATA, signed
 /// by the vault PDA. No-op when `amount == 0` to avoid useless CPIs and the
 /// log noise they produce.
+#[allow(clippy::too_many_arguments)]
 fn transfer_performance_fee<'info>(
     token_program_key: Pubkey,
     from_vault_ata: AccountInfo<'info>,
