@@ -31,3 +31,14 @@ borsh = "1.5"
 [[test]]
 name = "integration"
 path = "tests/lib.rs"
+
+# Suppress lints triggered by Anchor's procedural macros (`#[program]`,
+# `#[derive(Accounts)]`). Both originate from generated code we don't own:
+#   - `unexpected_cfgs`: Anchor emits `#[cfg(feature = "anchor-debug")]`,
+#     a feature this crate does not declare.
+#   - `clippy::diverging_sub_expression`: emitted by `#[program]` expansion.
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("anchor-debug"))'] }
+
+[lints.clippy]
+diverging_sub_expression = "allow"
