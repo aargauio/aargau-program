@@ -21,6 +21,20 @@ pub enum AargauError {
     #[msg("Public key must not be the default (zero) pubkey")]
     InvalidPublicKey = 1005,
 
+    #[msg("Vault token balance is insufficient for the requested action")]
+    InsufficientFunds = 1006,
+
+    #[msg("KeeperAction payload is missing or out of allowed bounds")]
+    InvalidActionPayload = 1007,
+
+    #[msg(
+        "Token-2022 mints are not supported in this milestone — deferred to a future milestone (transfer hooks)"
+    )]
+    Token2022NotSupported = 1008,
+
+    #[msg("Pool reserve account does not match the lb_pair on-chain reserve pubkey")]
+    InvalidPoolReserve = 1009,
+
     // --- Authority (1100–1199) ---
     #[msg("Signer is not the vault user authority")]
     UnauthorizedUser = 1100,
@@ -68,6 +82,12 @@ pub enum AargauError {
 
     #[msg("Pending rebalance has not reached its timeout yet")]
     PendingRebalanceNotExpired = 1305,
+
+    #[msg("Vault token balance decreased after CPI when it should have increased")]
+    PostCpiBalanceDecreased = 1306,
+
+    #[msg("Computed performance fee exceeds gross amount")]
+    FeeExceedsGross = 1307,
 
     // --- Protocol state (1400–1499) ---
     #[msg("Program is paused — only emergency_withdraw, withdraw, and close_vault are allowed")]

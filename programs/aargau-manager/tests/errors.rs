@@ -118,6 +118,16 @@ mod error_code_tests {
         assert_eq!(AargauError::PendingRebalanceNotExpired as u32, 1305);
     }
 
+    #[test]
+    fn test_post_cpi_balance_decreased_discriminant() {
+        assert_eq!(AargauError::PostCpiBalanceDecreased as u32, 1306);
+    }
+
+    #[test]
+    fn test_fee_exceeds_gross_discriminant() {
+        assert_eq!(AargauError::FeeExceedsGross as u32, 1307);
+    }
+
     // --- Protocol state range: 1400–1499 ---
 
     #[test]
