@@ -50,6 +50,42 @@ pub const METEORA_MINT_A_OFFSET: usize = 0;
 pub const METEORA_MINT_B_OFFSET: usize = 32;
 
 // ---------------------------------------------------------------------------
+// Meteora DLMM instruction discriminators (Anchor 8-byte: sha256("global:<name>")[0..8])
+// Cross-validated against aargau-backend Meteora tx builders.
+// ---------------------------------------------------------------------------
+
+/// `claim_fee2(min_bin_id: i32, max_bin_id: i32, remaining_accounts_info)`
+pub const METEORA_CLAIM_FEE2_DISCRIMINATOR: [u8; 8] = [112, 191, 101, 171, 28, 144, 127, 187];
+
+/// `add_liquidity_by_strategy2(amount_x, amount_y, active_id, max_active_bin_slippage,
+///                             strategy_parameters, remaining_accounts_info)`
+pub const METEORA_ADD_LIQUIDITY_BY_STRATEGY2_DISCRIMINATOR: [u8; 8] =
+    [3, 221, 149, 218, 111, 141, 118, 213];
+
+/// `remove_liquidity_by_range2(from_bin_id, to_bin_id, bps_to_remove, remaining_accounts_info)`
+pub const METEORA_REMOVE_LIQUIDITY_BY_RANGE2_DISCRIMINATOR: [u8; 8] =
+    [204, 2, 195, 145, 53, 145, 145, 205];
+
+// ---------------------------------------------------------------------------
+// Meteora bin layout / DLMM constants
+// ---------------------------------------------------------------------------
+
+/// Number of bins packed inside a single Meteora `BinArray` PDA.
+pub const METEORA_BINS_PER_ARRAY: i64 = 70;
+
+/// Default tolerance (in bins) accepted for the active bin shift between
+/// the off-chain quote and on-chain execution. Mirrors the Meteora SDK default.
+pub const MAX_ACTIVE_BIN_SLIPPAGE: i32 = 3;
+
+// ---------------------------------------------------------------------------
+// External program IDs used as account placeholders for Meteora CPIs
+// ---------------------------------------------------------------------------
+
+/// SPL Memo program — passed as `memo_program` account in `claim_fee2` and
+/// `remove_liquidity_by_range2`. Meteora forwards a memo when fees are paid.
+pub const MEMO_PROGRAM_ID: Pubkey = pubkey!("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+
+// ---------------------------------------------------------------------------
 // Operational limits
 // ---------------------------------------------------------------------------
 

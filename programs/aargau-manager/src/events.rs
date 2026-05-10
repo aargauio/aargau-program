@@ -134,6 +134,40 @@ pub struct RewardsClaimed {
     pub timestamp: i64,
 }
 
+// --- Liquidity changes (single-sided ops outside a full rebalance) ---
+
+/// Direction of a liquidity change emitted by `execute_action`.
+/// `#[repr(u8)]` so Borsh serialises as 1 byte.
+#[repr(u8)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LiquidityOp {
+    Increase,
+    Decrease,
+}
+
+/// Emitted by `execute_action::IncreaseLiquidity` and
+/// `execute_action::DecreaseLiquidity`.
+///
+/// `amount_a` / `amount_b` are the gross amounts moved between the vault ATAs
+/// and the pool reserves, observed from balance diffs on the vault token
+/// accounts before and after the underlying CPI. The direction (grew vs.
+/// shrank) is encoded in `op`; consumers derive the signed flow off-chain.
+///
+/// The DLMM-internal `liquidity` field of the position (Q64.64 bin liquidity)
+/// is intentionally not surfaced here — it would require parsing the DLMM
+/// position account and gives no extra information beyond `op + amounts` for
+/// indexer / P&L reconstruction.
+#[event]
+pub struct LiquidityChanged {
+    pub vault: Pubkey,
+    pub position_address: Pubkey,
+    pub op: LiquidityOp,
+    pub amount_a: u64,
+    pub amount_b: u64,
+    pub timestamp: i64,
+    pub triggered_by: TriggeredBy,
+}
+
 // --- Position ---
 
 #[event]

@@ -1,4 +1,5 @@
 pub mod fee;
+pub mod meteora;
 pub mod pool_validation;
 pub mod signer_seeds;
 
