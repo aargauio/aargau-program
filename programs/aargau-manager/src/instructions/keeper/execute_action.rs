@@ -14,9 +14,12 @@
 //! mints only.
 
 use crate::{
-    constants::{BPS_DIVISOR_U16, MEMO_PROGRAM_ID, METEORA_DLMM_PROGRAM_ID},
+    constants::{
+        BPS_DIVISOR_U16, MAX_ACTIVE_BIN_SLIPPAGE_HARD_CAP, MAX_METEORA_BINS, MEMO_PROGRAM_ID,
+        METEORA_DLMM_PROGRAM_ID, METEORA_INLINE_BITMAP_BIN_LIMIT, TREASURY_SEED,
+    },
     errors::AargauError,
-    events::{FeesClaimed, LiquidityChanged, LiquidityOp},
+    events::{FeesClaimed, LiquidityChanged, LiquidityOp, PositionClosed, PositionOpened},
     state::{KeeperAction, Protocol, ProtocolConfig, TriggeredBy, VaultAccount},
     utils::{
         fee::calc_aargau_fee,
@@ -26,10 +29,13 @@ use crate::{
                 METEORA_STRATEGY_SPOT_IMBALANCED,
             },
             claim_fee::{invoke_claim_fee2, ClaimFee2Cpi},
+            close_position::{invoke_close_position_if_empty, ClosePositionIfEmptyCpi},
             lb_pair_view::{
                 parse_lb_pair_view_from_bytes, require_lb_pair_bindings, require_spl_classic_mints,
                 LbPairView,
             },
+            open_position::{invoke_initialize_position, InitializePositionCpi},
+            position_view::require_position_v2,
             remove_liquidity::{invoke_remove_liquidity_by_range2, RemoveLiquidityByRange2Cpi},
         },
         signer_seeds::vault_signer_seeds,
@@ -90,7 +96,7 @@ pub struct ExecuteAction<'info> {
 
     /// CHECK: treasury PDA — validated by seeds + bump.
     #[account(
-        seeds = [b"treasury", protocol_config.key().as_ref()],
+        seeds = [TREASURY_SEED, protocol_config.key().as_ref()],
         bump,
     )]
     pub treasury_pda: UncheckedAccount<'info>,
@@ -120,12 +126,14 @@ pub struct ExecuteAction<'info> {
     )]
     pub lb_pair: UncheckedAccount<'info>,
 
-    /// CHECK: must equal `vault.position_address`. Owner is enforced by the
-    /// DLMM program when the CPI runs.
-    #[account(
-        mut,
-        constraint = Some(position.key()) == vault.position_address @ AargauError::VaultNoActivePosition,
-    )]
+    /// CHECK: for `CollectFees` / `IncreaseLiquidity` / `DecreaseLiquidity` /
+    /// `ClosePosition` this must equal `vault.position_address` and pass the
+    /// `PositionV2` discriminator check — enforced per-arm inside the handler
+    /// because `OpenPosition` runs against an uninitialised account that
+    /// would otherwise fail an Anchor constraint. For `OpenPosition` this is
+    /// the ephemeral `PositionV2` keypair co-signed off-chain by the client
+    /// (decision C1); the DLMM program initialises and owns it on success.
+    #[account(mut)]
     pub position: UncheckedAccount<'info>,
 
     /// CHECK: pool reserve for token X — DLMM enforces the binding to lb_pair.
@@ -137,9 +145,9 @@ pub struct ExecuteAction<'info> {
     pub reserve_y: UncheckedAccount<'info>,
 
     /// Token program for token X. Both A and B may use the same program (SPL
-    /// classic) or different programs in mixed Token-2022 pools — out of scope
-    /// for this milestone but the account is wired separately to keep the
-    /// account list stable when hooks land.
+    /// classic) or different programs in mixed Token-2022 pools — Token-2022
+    /// hooks are not yet wired, but the account is kept separate so the
+    /// account list stays stable when hook support is added.
     pub token_program_x: Interface<'info, TokenInterface>,
     pub token_program_y: Interface<'info, TokenInterface>,
 
@@ -167,6 +175,15 @@ pub struct ExecuteAction<'info> {
     /// CHECK: BinArray PDA = `bin_array_lower_index + 1`.
     #[account(mut)]
     pub bin_array_upper: UncheckedAccount<'info>,
+
+    /// System program — required by `initialize_position` (rent payment for
+    /// the new `PositionV2` account). Wired on every call to keep the IDL
+    /// stable across action variants.
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Rent sysvar — required by `initialize_position`. The DLMM
+    /// program checks the well-known sysvar key itself.
+    pub rent_sysvar: Sysvar<'info, Rent>,
 }
 
 pub fn handler(mut ctx: Context<ExecuteAction>, params: ExecuteActionParams) -> Result<()> {
@@ -193,31 +210,50 @@ pub fn handler(mut ctx: Context<ExecuteAction>, params: ExecuteActionParams) -> 
 
     // SPL-classic enforcement on the fee transfer path. The treasury split
     // uses `token_program`; if either mint lives under Token-2022 we cannot
-    // safely run `transfer_checked` without the transfer-hook accounts that
-    // a future milestone will introduce.
+    // safely run `transfer_checked` without the transfer-hook accounts,
+    // which are not yet wired.
     require_spl_classic_mints(
         ctx.accounts.mint_a.to_account_info().owner,
         ctx.accounts.mint_b.to_account_info().owner,
         &ctx.accounts.token_program.key(),
     )?;
 
-    let (range_lower, range_upper) = position_range(&ctx.accounts.vault)?;
-
     match params.action {
-        KeeperAction::CollectFees => handle_collect_fees(&mut ctx, range_lower, range_upper),
+        KeeperAction::CollectFees => {
+            require_active_position_v2(&ctx.accounts.vault, &ctx.accounts.position)?;
+            let (range_lower, range_upper) = position_range(&ctx.accounts.vault)?;
+            handle_collect_fees(&mut ctx, range_lower, range_upper)
+        }
         KeeperAction::IncreaseLiquidity {
             amount_a_max,
             amount_b_max,
-        } => handle_increase_liquidity(
-            &mut ctx,
-            range_lower,
-            range_upper,
-            amount_a_max,
-            amount_b_max,
-            lb_pair_view.active_id,
-        ),
+            active_id_slippage,
+        } => {
+            require_active_position_v2(&ctx.accounts.vault, &ctx.accounts.position)?;
+            let (range_lower, range_upper) = position_range(&ctx.accounts.vault)?;
+            require_bin_count_within_cap(range_lower, range_upper)?;
+            handle_increase_liquidity(
+                &mut ctx,
+                range_lower,
+                range_upper,
+                amount_a_max,
+                amount_b_max,
+                lb_pair_view.active_id,
+                active_id_slippage,
+            )
+        }
         KeeperAction::DecreaseLiquidity { bps } => {
+            require_active_position_v2(&ctx.accounts.vault, &ctx.accounts.position)?;
+            let (range_lower, range_upper) = position_range(&ctx.accounts.vault)?;
             handle_decrease_liquidity(&mut ctx, range_lower, range_upper, bps)
+        }
+        KeeperAction::OpenPosition {
+            lower_bin_id,
+            upper_bin_id,
+        } => handle_open_position(&mut ctx, lower_bin_id, upper_bin_id),
+        KeeperAction::ClosePosition => {
+            require_active_position_v2(&ctx.accounts.vault, &ctx.accounts.position)?;
+            handle_close_position(&mut ctx)
         }
     }
 }
@@ -327,6 +363,7 @@ fn handle_increase_liquidity(
     amount_a_max: u64,
     amount_b_max: u64,
     active_id: i32,
+    active_id_slippage: u16,
 ) -> Result<()> {
     require!(
         amount_a_max > 0 || amount_b_max > 0,
@@ -339,6 +376,13 @@ fn handle_increase_liquidity(
     require!(
         amount_b_max <= ctx.accounts.vault_token_b.amount,
         AargauError::InsufficientFunds
+    );
+    // Cap the caller-supplied bin-slippage budget. Without an upper bound a
+    // buggy or hostile caller could pass `u16::MAX` and effectively disable
+    // Meteora's own slippage protection.
+    require!(
+        active_id_slippage <= MAX_ACTIVE_BIN_SLIPPAGE_HARD_CAP,
+        AargauError::SlippageOutOfRange
     );
 
     let pre_a = ctx.accounts.vault_token_a.amount;
@@ -377,6 +421,7 @@ fn handle_increase_liquidity(
         amount_a_max,
         amount_b_max,
         active_id,
+        i32::from(active_id_slippage),
         range_lower,
         range_upper,
         METEORA_STRATEGY_SPOT_IMBALANCED,
@@ -483,6 +528,94 @@ fn handle_decrease_liquidity(
     Ok(())
 }
 
+fn handle_open_position(
+    ctx: &mut Context<ExecuteAction>,
+    lower_bin_id: i32,
+    upper_bin_id: i32,
+) -> Result<()> {
+    // Vault must be idle — `position_address.is_none()` is the canonical
+    // marker. Any other state (active position, pending rebalance) is
+    // rejected upfront to keep the open/close lifecycle linear and
+    // recoverable from off-chain observation alone.
+    require!(
+        ctx.accounts.vault.position_address.is_none(),
+        AargauError::VaultHasActivePosition
+    );
+    require!(
+        upper_bin_id >= lower_bin_id,
+        AargauError::InvalidActionPayload
+    );
+    require_bin_count_within_cap(lower_bin_id, upper_bin_id)?;
+    require_range_within_inline_bitmap(lower_bin_id, upper_bin_id)?;
+
+    let seed_bytes = vault_signer_seed_bytes(&ctx.accounts.vault);
+    let seeds = vault_signer_seeds(&seed_bytes.user, &seed_bytes.pool, &seed_bytes.bump);
+
+    let cpi = InitializePositionCpi {
+        dlmm_program: ctx.accounts.dlmm_program.to_account_info(),
+        user_authority: ctx.accounts.user.to_account_info(),
+        position: ctx.accounts.position.to_account_info(),
+        lb_pair: ctx.accounts.lb_pair.to_account_info(),
+        vault: ctx.accounts.vault.to_account_info(),
+        system_program: ctx.accounts.system_program.to_account_info(),
+        rent_sysvar: ctx.accounts.rent_sysvar.to_account_info(),
+        event_authority: ctx.accounts.event_authority.to_account_info(),
+    };
+    invoke_initialize_position(&cpi, lower_bin_id, upper_bin_id, &seeds)?;
+
+    // Persist the new position on the vault so subsequent arms can rely on
+    // `position_address` + range fields without re-reading the DLMM account.
+    let vault = &mut ctx.accounts.vault;
+    vault.position_address = Some(ctx.accounts.position.key());
+    vault.position_range_lower = Some(lower_bin_id);
+    vault.position_range_upper = Some(upper_bin_id);
+
+    let clock = Clock::get()?;
+    emit!(PositionOpened {
+        vault: vault.key(),
+        position_address: ctx.accounts.position.key(),
+        range_lower: lower_bin_id,
+        range_upper: upper_bin_id,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+fn handle_close_position(ctx: &mut Context<ExecuteAction>) -> Result<()> {
+    let position_key = ctx.accounts.position.key();
+
+    let seed_bytes = vault_signer_seed_bytes(&ctx.accounts.vault);
+    let seeds = vault_signer_seeds(&seed_bytes.user, &seed_bytes.pool, &seed_bytes.bump);
+
+    // `close_position_if_empty` aborts if any per-bin liquidity share is
+    // still non-zero, so the caller must have drained the position via
+    // `DecreaseLiquidity { bps: 10_000 }` (and ideally a `CollectFees` to
+    // sweep pending rewards) before reaching this arm.
+    let cpi = ClosePositionIfEmptyCpi {
+        dlmm_program: ctx.accounts.dlmm_program.to_account_info(),
+        position: ctx.accounts.position.to_account_info(),
+        vault: ctx.accounts.vault.to_account_info(),
+        rent_receiver: ctx.accounts.user.to_account_info(),
+        event_authority: ctx.accounts.event_authority.to_account_info(),
+    };
+    invoke_close_position_if_empty(&cpi, &seeds)?;
+
+    let vault = &mut ctx.accounts.vault;
+    vault.position_address = None;
+    vault.position_range_lower = None;
+    vault.position_range_upper = None;
+
+    let clock = Clock::get()?;
+    emit!(PositionClosed {
+        vault: vault.key(),
+        position_address: position_key,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
@@ -563,4 +696,46 @@ fn position_range(vault: &VaultAccount) -> Result<(i32, i32)> {
 fn parse_lb_pair_view(lb_pair: &UncheckedAccount<'_>) -> Result<LbPairView> {
     let data = lb_pair.try_borrow_data()?;
     parse_lb_pair_view_from_bytes(&data)
+}
+
+/// Combined check for action arms that consume the existing position: the
+/// `position` AccountInfo must match `vault.position_address` *and* be a
+/// real `PositionV2` owned by the DLMM program. The key-equality check
+/// alone is necessary but not sufficient — see `require_position_v2`.
+fn require_active_position_v2(vault: &VaultAccount, position: &UncheckedAccount<'_>) -> Result<()> {
+    let expected = vault
+        .position_address
+        .ok_or(AargauError::VaultNoActivePosition)?;
+    require_keys_eq!(position.key(), expected, AargauError::VaultNoActivePosition);
+    require_position_v2(&position.to_account_info())
+}
+
+/// Enforce the Meteora bin-count cap on `[lower, upper]` (inclusive).
+/// Reuses the spec constant `MAX_METEORA_BINS` so the budget moves in one
+/// place if Meteora ever raises the per-position cap.
+fn require_bin_count_within_cap(lower_bin_id: i32, upper_bin_id: i32) -> Result<()> {
+    let width = upper_bin_id
+        .checked_sub(lower_bin_id)
+        .and_then(|delta| delta.checked_add(1))
+        .ok_or(AargauError::Overflow)?;
+    require!(
+        width > 0 && width <= MAX_METEORA_BINS,
+        AargauError::TooManyBins
+    );
+    Ok(())
+}
+
+/// Reject ranges whose endpoints fall outside the inline `LbPair` bitmap.
+/// Crossing the limit forces the DLMM program to consult the
+/// `bin_array_bitmap_extension` PDA, which is not yet wired as a real
+/// account (the slot is filled with the program-id placeholder).
+/// Returning `BitmapExtensionRequired` upfront keeps the failure mode
+/// observable instead of bubbling up an opaque DLMM error.
+fn require_range_within_inline_bitmap(lower_bin_id: i32, upper_bin_id: i32) -> Result<()> {
+    require!(
+        lower_bin_id >= -METEORA_INLINE_BITMAP_BIN_LIMIT
+            && upper_bin_id <= METEORA_INLINE_BITMAP_BIN_LIMIT,
+        AargauError::BitmapExtensionRequired
+    );
+    Ok(())
 }

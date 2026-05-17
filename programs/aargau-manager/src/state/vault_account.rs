@@ -48,17 +48,6 @@ pub enum RangeStrategy {
     Skewed,
 }
 
-/// Action type for execute_action.
-#[repr(u8)]
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
-pub enum ActionType {
-    Compound,
-    Rebalance,
-    StopLoss,
-    TakeProfit,
-    CollectFees,
-}
-
 /// Phase for two-phase rebalance (Orca/Raydium) or single-phase (Meteora).
 #[repr(u8)]
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]

@@ -1,6 +1,6 @@
 //! Raw CPI builder for Meteora DLMM `claim_fee2`.
 //!
-//! Account layout (mirrors `aargau-backend/.../meteora/txs/claim.rs`):
+//! Account layout (mirrors the Meteora DLMM IDL):
 //!
 //! | idx | role             | flags         |
 //! |----:|------------------|---------------|

@@ -28,12 +28,15 @@ pub enum AargauError {
     InvalidActionPayload = 1007,
 
     #[msg(
-        "Token-2022 mints are not supported in this milestone — deferred to a future milestone (transfer hooks)"
+        "Token-2022 mints are not supported — transfer hooks not yet wired into the fee transfer path"
     )]
     Token2022NotSupported = 1008,
 
     #[msg("Pool reserve account does not match the lb_pair on-chain reserve pubkey")]
     InvalidPoolReserve = 1009,
+
+    #[msg("active_id_slippage exceeds the hard cap")]
+    SlippageOutOfRange = 1010,
 
     // --- Authority (1100–1199) ---
     #[msg("Signer is not the vault user authority")]
@@ -63,6 +66,14 @@ pub enum AargauError {
 
     #[msg("Pool operation is disabled by Raydium status bitmask")]
     PoolOperationDisabled = 1204,
+
+    #[msg("Meteora position account is not a PositionV2 (wrong discriminator or owning program)")]
+    InvalidPositionDiscriminator = 1205,
+
+    #[msg(
+        "Bin range exceeds the inline LbPair bitmap; bin_array_bitmap_extension support is not implemented"
+    )]
+    BitmapExtensionRequired = 1206,
 
     // --- Vault state (1300–1399) ---
     #[msg("Vault PDA derivation mismatch")]

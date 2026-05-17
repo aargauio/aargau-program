@@ -1,6 +1,6 @@
 //! Raw CPI builder for Meteora DLMM `remove_liquidity_by_range2`.
 //!
-//! Account layout (mirrors `aargau-backend/.../meteora/txs/remove.rs`):
+//! Account layout (mirrors the Meteora DLMM IDL):
 //!
 //! | idx | role                        | flags        |
 //! |----:|-----------------------------|--------------|

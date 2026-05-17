@@ -6,7 +6,7 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-aargau_manager = "AargMgr11111111111111111111111111111111111"
+aargau_manager = "AargMgr1111111111111111111111111111111111111"
 
 [registry]
 url = "https://api.apr.dev"

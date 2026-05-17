@@ -112,8 +112,8 @@ mod account_size_tests {
 #[cfg(test)]
 mod enum_size_tests {
     use aargau_manager::state::{
-        ActionType, ExecutionPhase, Protocol, RangeStrategy, RangeUnit, RebalanceDirection,
-        RebalanceTrigger, TriggeredBy,
+        ExecutionPhase, Protocol, RangeStrategy, RangeUnit, RebalanceDirection, RebalanceTrigger,
+        TriggeredBy,
     };
 
     /// CRITICAL: all enums must be exactly 1 byte due to #[repr(u8)].
@@ -156,19 +156,14 @@ mod enum_size_tests {
             1,
             "RangeStrategy must be 1 byte (#[repr(u8)])"
         );
-        assert_eq!(
-            std::mem::size_of::<ActionType>(),
-            1,
-            "ActionType must be 1 byte (#[repr(u8)])"
-        );
     }
 }
 
 #[cfg(test)]
 mod enum_variant_tests {
     use aargau_manager::state::{
-        ActionType, ExecutionPhase, Protocol, RangeStrategy, RangeUnit, RebalanceDirection,
-        RebalanceTrigger, TriggeredBy,
+        ExecutionPhase, Protocol, RangeStrategy, RangeUnit, RebalanceDirection, RebalanceTrigger,
+        TriggeredBy,
     };
 
     // Protocol discriminants — order matters for Borsh round-trip compatibility.
@@ -244,32 +239,6 @@ mod enum_variant_tests {
     #[test]
     fn test_range_strategy_skewed_discriminant() {
         assert_eq!(RangeStrategy::Skewed as u8, 2);
-    }
-
-    // ActionType discriminants
-    #[test]
-    fn test_action_type_compound_discriminant() {
-        assert_eq!(ActionType::Compound as u8, 0);
-    }
-
-    #[test]
-    fn test_action_type_rebalance_discriminant() {
-        assert_eq!(ActionType::Rebalance as u8, 1);
-    }
-
-    #[test]
-    fn test_action_type_stop_loss_discriminant() {
-        assert_eq!(ActionType::StopLoss as u8, 2);
-    }
-
-    #[test]
-    fn test_action_type_take_profit_discriminant() {
-        assert_eq!(ActionType::TakeProfit as u8, 3);
-    }
-
-    #[test]
-    fn test_action_type_collect_fees_discriminant() {
-        assert_eq!(ActionType::CollectFees as u8, 4);
     }
 
     // ExecutionPhase discriminants

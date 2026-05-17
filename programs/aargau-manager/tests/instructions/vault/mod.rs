@@ -5,5 +5,6 @@ pub mod create_vault;
 pub mod deposit;
 pub mod emergency_withdraw;
 pub mod manual_rebalance;
+pub mod manual_rebalance_meteora;
 pub mod retry_pending_rebalance;
 pub mod withdraw;
