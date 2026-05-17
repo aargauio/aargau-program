@@ -162,19 +162,26 @@ mod mint_offset_tests {
 
     #[test]
     fn test_meteora_mint_a_offset() {
-        assert_eq!(METEORA_MINT_A_OFFSET, 0);
+        // Absolute offset into the raw LbPair account buffer (the 8-byte
+        // Anchor discriminator is included). Mirrors
+        // `LB_PAIR_TOKEN_X_MINT_OFFSET = 88` in `utils::meteora::lb_pair_view`
+        // and the production backend decoder.
+        assert_eq!(METEORA_MINT_A_OFFSET, 88);
     }
 
     #[test]
     fn test_meteora_mint_b_offset() {
-        assert_eq!(METEORA_MINT_B_OFFSET, 32);
+        // Absolute offset into the raw LbPair account buffer.
+        assert_eq!(METEORA_MINT_B_OFFSET, 120);
     }
 
     #[test]
     fn test_mint_b_offset_is_always_after_mint_a() {
         // Mint B must come after Mint A in every protocol's account layout.
-        assert!(ORCA_MINT_B_OFFSET > ORCA_MINT_A_OFFSET);
-        assert!(RAYDIUM_MINT_B_OFFSET > RAYDIUM_MINT_A_OFFSET);
-        assert!(METEORA_MINT_B_OFFSET > METEORA_MINT_A_OFFSET);
+        // `const { … }` forces evaluation at compile time so the lint sees
+        // these as compile-time invariants, not runtime assertions.
+        const _: () = assert!(ORCA_MINT_B_OFFSET > ORCA_MINT_A_OFFSET);
+        const _: () = assert!(RAYDIUM_MINT_B_OFFSET > RAYDIUM_MINT_A_OFFSET);
+        const _: () = assert!(METEORA_MINT_B_OFFSET > METEORA_MINT_A_OFFSET);
     }
 }

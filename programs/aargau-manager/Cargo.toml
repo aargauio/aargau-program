@@ -28,6 +28,10 @@ borsh = "1.5"
 
 [dev-dependencies]
 borsh = "1.5"
+# SVM test harness compatible with solana-program 4.0. Used by the integration
+# test binary to load pinned `.so` programs (e.g. Meteora DLMM) into an
+# in-process executor without spinning up `solana-test-validator`.
+mollusk-svm = "=0.12.1-agave-4.0"
 
 [[test]]
 name = "integration"

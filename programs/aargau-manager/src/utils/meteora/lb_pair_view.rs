@@ -12,12 +12,11 @@ use anchor_lang::prelude::*;
 /// Subset of `LbPair` fields read directly from the raw account data.
 ///
 /// Offsets are **absolute into the account data buffer** (the 8-byte Anchor
-/// discriminator counts as bytes 0..8). Cross-validated against the backend
-/// parser at `aargau-backend/.../meteora/adapter.rs` (constants
-/// `LB_PAIR_ACTIVE_ID_OFFSET = 76`, `LB_PAIR_TOKEN_X_MINT_OFFSET = 88`,
-/// `LB_PAIR_TOKEN_Y_MINT_OFFSET = 120`) and against the tx builder at
-/// `aargau-backend/.../meteora/txs/add.rs` (which reads `[152..184]` for
-/// `reserve_x` and `[184..216]` for `reserve_y`).
+/// discriminator counts as bytes 0..8). Layout:
+///   `LB_PAIR_ACTIVE_ID_OFFSET = 76`,
+///   `LB_PAIR_TOKEN_X_MINT_OFFSET = 88`,
+///   `LB_PAIR_TOKEN_Y_MINT_OFFSET = 120`,
+///   `reserve_x = [152..184]`, `reserve_y = [184..216]`.
 #[derive(Debug)]
 pub struct LbPairView {
     pub active_id: i32,
@@ -102,9 +101,9 @@ pub fn require_lb_pair_bindings(
     Ok(())
 }
 
-/// Reject Token-2022 mints in this milestone. Transfer-hook plumbing on the
-/// Meteora `remaining_accounts_info` tail and on the treasury fee transfers
-/// is deferred to a future scope.
+/// Reject Token-2022 mints. Transfer-hook plumbing on the Meteora
+/// `remaining_accounts_info` tail and on the treasury fee transfers is not
+/// yet wired.
 pub fn require_spl_classic_mints(
     mint_a_owner: &Pubkey,
     mint_b_owner: &Pubkey,

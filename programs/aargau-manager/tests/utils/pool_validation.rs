@@ -49,7 +49,9 @@ mod read_mint_tests {
     #[test]
     fn test_read_mint_a_meteora_returns_correct_pubkey() {
         let expected = Pubkey::new_unique();
-        let raw_offset = 8 + METEORA_MINT_A_OFFSET;
+        // Meteora offsets are stored as ABSOLUTE positions in the raw
+        // account buffer (no +8 adjustment), unlike Orca/Raydium.
+        let raw_offset = METEORA_MINT_A_OFFSET;
         let buf = fake_pool_data_with_mint_at(raw_offset + 32, raw_offset, expected);
         let result = read_mint_a(&buf, Protocol::Meteora);
         assert!(result.is_ok());
@@ -107,7 +109,8 @@ mod read_mint_tests {
     #[test]
     fn test_read_mint_b_meteora_returns_correct_pubkey() {
         let expected = Pubkey::new_unique();
-        let raw_offset = 8 + METEORA_MINT_B_OFFSET;
+        // Absolute offset (see `test_read_mint_a_meteora_returns_correct_pubkey`).
+        let raw_offset = METEORA_MINT_B_OFFSET;
         let buf = fake_pool_data_with_mint_at(raw_offset + 32, raw_offset, expected);
         let result = read_mint_b(&buf, Protocol::Meteora);
         assert!(result.is_ok());

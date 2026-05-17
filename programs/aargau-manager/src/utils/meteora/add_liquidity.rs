@@ -1,6 +1,6 @@
 //! Raw CPI builder for Meteora DLMM `add_liquidity_by_strategy2`.
 //!
-//! Account layout (mirrors `aargau-backend/.../meteora/txs/add.rs`):
+//! Account layout (mirrors the Meteora DLMM IDL):
 //!
 //! | idx | role                        | flags        |
 //! |----:|-----------------------------|--------------|
@@ -43,10 +43,7 @@ use anchor_lang::solana_program::{
     program::invoke_signed,
 };
 
-use crate::constants::{
-    MAX_ACTIVE_BIN_SLIPPAGE, METEORA_ADD_LIQUIDITY_BY_STRATEGY2_DISCRIMINATOR,
-    METEORA_DLMM_PROGRAM_ID,
-};
+use crate::constants::{METEORA_ADD_LIQUIDITY_BY_STRATEGY2_DISCRIMINATOR, METEORA_DLMM_PROGRAM_ID};
 
 use super::accounts::{
     derive_bin_array_pair, empty_transfer_hook_remaining_accounts_info, EMPTY_TRANSFER_HOOK_RAI_LEN,
@@ -79,12 +76,18 @@ pub struct AddLiquidityByStrategy2Cpi<'info> {
     pub bin_array_upper: AccountInfo<'info>,
 }
 
+/// `max_active_bin_slippage` bounds how many bins the on-chain `active_id`
+/// may have moved from the caller-supplied `active_id` between quote and
+/// execution. Higher values trade safety for resilience to volatility; the
+/// caller is responsible for picking a sensible budget (and for enforcing
+/// any upper bound — this helper forwards the raw value to Meteora).
 #[allow(clippy::too_many_arguments)]
 pub fn invoke_add_liquidity_by_strategy2(
     cpi: &AddLiquidityByStrategy2Cpi<'_>,
     amount_x: u64,
     amount_y: u64,
     active_id: i32,
+    max_active_bin_slippage: i32,
     min_bin_id: i32,
     max_bin_id: i32,
     strategy_type: u8,
@@ -106,7 +109,7 @@ pub fn invoke_add_liquidity_by_strategy2(
     data.extend_from_slice(&amount_x.to_le_bytes());
     data.extend_from_slice(&amount_y.to_le_bytes());
     data.extend_from_slice(&active_id.to_le_bytes());
-    data.extend_from_slice(&MAX_ACTIVE_BIN_SLIPPAGE.to_le_bytes());
+    data.extend_from_slice(&max_active_bin_slippage.to_le_bytes());
     data.extend_from_slice(&min_bin_id.to_le_bytes());
     data.extend_from_slice(&max_bin_id.to_le_bytes());
     data.push(strategy_type);

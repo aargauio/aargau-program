@@ -1,4 +1,4 @@
-use crate::{errors::AargauError, state::ProtocolConfig};
+use crate::{constants::TREASURY_SEED, errors::AargauError, state::ProtocolConfig};
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 
@@ -21,7 +21,7 @@ pub struct WithdrawTreasury<'info> {
 
     /// CHECK: treasury PDA — validated by seeds constraint
     #[account(
-        seeds = [b"treasury", protocol_config.key().as_ref()],
+        seeds = [TREASURY_SEED, protocol_config.key().as_ref()],
         bump,
     )]
     pub treasury_pda: UncheckedAccount<'info>,

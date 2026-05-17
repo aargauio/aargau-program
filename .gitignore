@@ -7,6 +7,10 @@ target/
 programs/**/.so
 programs/**/keypair.json
 
+# Test fixtures — pinned external .so binaries dumped on demand
+# (see programs/aargau-manager/tests/fixtures/mod.rs for dump instructions).
+programs/aargau-manager/tests/fixtures/*.so
+
 # Solana keypairs (never commit)
 **/*-keypair.json
 deploy-keypair.json
