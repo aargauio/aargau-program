@@ -15,8 +15,8 @@
 
 use crate::{
     constants::{
-        BPS_DIVISOR_U16, MAX_ACTIVE_BIN_SLIPPAGE_HARD_CAP, MAX_METEORA_BINS, MEMO_PROGRAM_ID,
-        METEORA_DLMM_PROGRAM_ID, METEORA_INLINE_BITMAP_BIN_LIMIT, TREASURY_SEED,
+        BPS_DIVISOR_U16, MAX_ACTIVE_BIN_SLIPPAGE_HARD_CAP, MEMO_PROGRAM_ID,
+        METEORA_DLMM_PROGRAM_ID, TREASURY_SEED,
     },
     errors::AargauError,
     events::{FeesClaimed, LiquidityChanged, LiquidityOp, PositionClosed, PositionOpened},
@@ -39,6 +39,7 @@ use crate::{
             remove_liquidity::{invoke_remove_liquidity_by_range2, RemoveLiquidityByRange2Cpi},
         },
         signer_seeds::vault_signer_seeds,
+        vault_ops::{require_bin_count_within_cap, require_range_within_inline_bitmap},
     },
 };
 use anchor_lang::prelude::*;
@@ -232,6 +233,7 @@ pub fn handler(mut ctx: Context<ExecuteAction>, params: ExecuteActionParams) -> 
             require_active_position_v2(&ctx.accounts.vault, &ctx.accounts.position)?;
             let (range_lower, range_upper) = position_range(&ctx.accounts.vault)?;
             require_bin_count_within_cap(range_lower, range_upper)?;
+            require_range_within_inline_bitmap(range_lower, range_upper)?;
             handle_increase_liquidity(
                 &mut ctx,
                 range_lower,
@@ -310,6 +312,15 @@ fn handle_collect_fees(
     let fee_a = calc_aargau_fee(gross_a, fee_rate_bps)?;
     let fee_b = calc_aargau_fee(gross_b, fee_rate_bps)?;
 
+    // Guard before any CPI: if fee > gross the transaction must abort here,
+    // not after tokens have already been transferred to the treasury.
+    let user_net_a = gross_a
+        .checked_sub(fee_a)
+        .ok_or(error!(AargauError::FeeExceedsGross))?;
+    let user_net_b = gross_b
+        .checked_sub(fee_b)
+        .ok_or(error!(AargauError::FeeExceedsGross))?;
+
     let token_program_key = ctx.accounts.token_program.key();
     let signer_arr: &[&[&[u8]]] = &[&seeds];
 
@@ -333,13 +344,6 @@ fn handle_collect_fees(
         fee_b,
         signer_arr,
     )?;
-
-    let user_net_a = gross_a
-        .checked_sub(fee_a)
-        .ok_or(error!(AargauError::FeeExceedsGross))?;
-    let user_net_b = gross_b
-        .checked_sub(fee_b)
-        .ok_or(error!(AargauError::FeeExceedsGross))?;
 
     let clock = Clock::get()?;
     emit!(FeesClaimed {
@@ -430,12 +434,13 @@ fn handle_increase_liquidity(
 
     ctx.accounts.vault_token_a.reload()?;
     ctx.accounts.vault_token_b.reload()?;
-    let consumed_a = pre_a
-        .checked_sub(ctx.accounts.vault_token_a.amount)
-        .ok_or(error!(AargauError::PostCpiBalanceDecreased))?;
-    let consumed_b = pre_b
-        .checked_sub(ctx.accounts.vault_token_b.amount)
-        .ok_or(error!(AargauError::PostCpiBalanceDecreased))?;
+    // When the active price is outside the position's range Meteora only
+    // consumes one token side and may return tokens on the other, making
+    // post > pre for that side. saturating_sub yields 0 (no tokens consumed)
+    // rather than reverting. The upstream InsufficientFunds guards already
+    // ensure pre >= amount_*_max, so no real underflow is masked here.
+    let consumed_a = pre_a.saturating_sub(ctx.accounts.vault_token_a.amount);
+    let consumed_b = pre_b.saturating_sub(ctx.accounts.vault_token_b.amount);
 
     let clock = Clock::get()?;
     emit!(LiquidityChanged {
@@ -569,6 +574,8 @@ fn handle_open_position(
     vault.position_address = Some(ctx.accounts.position.key());
     vault.position_range_lower = Some(lower_bin_id);
     vault.position_range_upper = Some(upper_bin_id);
+    // Meteora DLMM positions are not NFT-backed; position_mint is not applicable.
+    // vault.position_mint is intentionally left as None.
 
     let clock = Clock::get()?;
     emit!(PositionOpened {
@@ -710,32 +717,5 @@ fn require_active_position_v2(vault: &VaultAccount, position: &UncheckedAccount<
     require_position_v2(&position.to_account_info())
 }
 
-/// Enforce the Meteora bin-count cap on `[lower, upper]` (inclusive).
-/// Reuses the spec constant `MAX_METEORA_BINS` so the budget moves in one
-/// place if Meteora ever raises the per-position cap.
-fn require_bin_count_within_cap(lower_bin_id: i32, upper_bin_id: i32) -> Result<()> {
-    let width = upper_bin_id
-        .checked_sub(lower_bin_id)
-        .and_then(|delta| delta.checked_add(1))
-        .ok_or(AargauError::Overflow)?;
-    require!(
-        width > 0 && width <= MAX_METEORA_BINS,
-        AargauError::TooManyBins
-    );
-    Ok(())
-}
-
-/// Reject ranges whose endpoints fall outside the inline `LbPair` bitmap.
-/// Crossing the limit forces the DLMM program to consult the
-/// `bin_array_bitmap_extension` PDA, which is not yet wired as a real
-/// account (the slot is filled with the program-id placeholder).
-/// Returning `BitmapExtensionRequired` upfront keeps the failure mode
-/// observable instead of bubbling up an opaque DLMM error.
-fn require_range_within_inline_bitmap(lower_bin_id: i32, upper_bin_id: i32) -> Result<()> {
-    require!(
-        lower_bin_id >= -METEORA_INLINE_BITMAP_BIN_LIMIT
-            && upper_bin_id <= METEORA_INLINE_BITMAP_BIN_LIMIT,
-        AargauError::BitmapExtensionRequired
-    );
-    Ok(())
-}
+// require_bin_count_within_cap and require_range_within_inline_bitmap are
+// shared with manual_rebalance — they live in utils::vault_ops.
