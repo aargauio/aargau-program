@@ -14,12 +14,15 @@
 //! - `withdraw` — proportional token withdrawal from idle vault
 //! - `emergency_withdraw` — unconditional full exit, bypasses is_paused
 //! - `set_protocol_pause` — admin kill switch
+//! - `execute_action` — keeper-style Meteora DLMM vault operations
+//!   (CollectFees, IncreaseLiquidity, DecreaseLiquidity, OpenPosition, ClosePosition)
+//! - `manual_rebalance` — user-signed atomic Meteora DLMM rebalance
+//!   (claim_fee2 + rebalance_liquidity in one transaction)
 //!
 //! ## Stubs (correct signatures, reserved for future implementation):
-//! - `close_vault`, `claim_rewards`, `manual_rebalance`,
-//!   `cancel_pending_rebalance`, `retry_pending_rebalance`,
-//!   `update_protocol_config`, `withdraw_treasury`, `transfer_admin`,
-//!   `admin_emergency_transfer`, `execute_action`, `report_rebalance_attempt`
+//! - `close_vault`, `claim_rewards`, `cancel_pending_rebalance`,
+//!   `retry_pending_rebalance`, `update_protocol_config`, `withdraw_treasury`,
+//!   `transfer_admin`, `admin_emergency_transfer`, `report_rebalance_attempt`
 
 use anchor_lang::prelude::*;
 
@@ -141,7 +144,7 @@ pub mod aargau_manager {
     }
 
     // -------------------------------------------------------------------------
-    // Keeper co-signed instructions (stubs — reserved for future use)
+    // Keeper co-signed instructions
     // -------------------------------------------------------------------------
 
     pub fn execute_action(ctx: Context<ExecuteAction>, params: ExecuteActionParams) -> Result<()> {

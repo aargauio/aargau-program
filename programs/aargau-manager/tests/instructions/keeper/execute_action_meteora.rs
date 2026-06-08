@@ -52,11 +52,22 @@ mod harness {
             &meteora_elf,
         );
 
-        // The Aargau program must also be loaded if any test wants to
-        // exercise the keeper instruction end-to-end. Concrete dump
-        // commands and account fixtures are out of scope for the
-        // fixture-gated tests below — each test prefixes its own setup.
-        let _ = aargau_program_id;
+        // The Aargau program must also be loaded for end-to-end tests.
+        // Built by `cargo build-sbf` — run it before integration tests.
+        let program_so = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/deploy/aargau_manager.so");
+
+        if program_so.exists() {
+            let aargau_elf = std::fs::read(&program_so)
+                .map_err(|e| format!("failed to read aargau_manager.so: {e}"))?;
+            mollusk.add_program_with_loader_and_elf(
+                aargau_program_id,
+                &mollusk_svm::program::loader_keys::LOADER_V3,
+                &aargau_elf,
+            );
+        }
+        // If the binary is absent, fixture-gated tests will early-return via
+        // the `try_load_meteora` guard before reaching any Aargau CPI.
 
         Ok(mollusk)
     }

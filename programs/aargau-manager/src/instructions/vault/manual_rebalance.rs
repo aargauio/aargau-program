@@ -40,8 +40,7 @@
 
 use crate::{
     constants::{
-        BPS_DIVISOR_U16, MAX_ACTIVE_BIN_SLIPPAGE_HARD_CAP, MAX_METEORA_BINS, MEMO_PROGRAM_ID,
-        METEORA_DLMM_PROGRAM_ID, METEORA_INLINE_BITMAP_BIN_LIMIT,
+        MAX_ACTIVE_BIN_SLIPPAGE_HARD_CAP, MEMO_PROGRAM_ID, METEORA_DLMM_PROGRAM_ID,
         METEORA_REBALANCE_SHOULD_CLAIM_FEE, TREASURY_SEED,
     },
     errors::AargauError,
@@ -62,6 +61,7 @@ use crate::{
             },
         },
         signer_seeds::vault_signer_seeds,
+        vault_ops::{require_bin_count_within_cap, require_range_within_inline_bitmap},
     },
 };
 use anchor_lang::prelude::*;
@@ -252,10 +252,21 @@ pub fn handler(mut ctx: Context<ManualRebalance>, params: ManualRebalanceParams)
     require_active_position_v2(&ctx.accounts.vault, &ctx.accounts.position)?;
 
     let (old_lower_bin_id, old_upper_bin_id) = position_range(&ctx.accounts.vault)?;
-    validate_rebalance_params(&params)?;
 
     // ── Step 1: claim_fee2 + treasury split ────────────────────────────────
+    // Fees are collected before validation so that `validate_rebalance_params`
+    // sees the post-claim vault balances. Without this ordering, a caller who
+    // wants to reinvest accrued fees alongside idle tokens would be falsely
+    // rejected by the `amount_a_max <= vault_balance_a` check.
     claim_fees_and_route_to_treasury(&mut ctx, old_lower_bin_id, old_upper_bin_id)?;
+    // `claim_fees_and_route_to_treasury` already reloads both ATAs after the
+    // fee transfer, so the amounts below reflect the true post-claim,
+    // post-fee-split balances.
+    validate_rebalance_params(
+        &params,
+        ctx.accounts.vault_token_a.amount,
+        ctx.accounts.vault_token_b.amount,
+    )?;
 
     // ── Step 2: rebalance_liquidity (should_claim_fee = false) ─────────────
     execute_rebalance_cpi(&ctx, old_lower_bin_id, lb_pair_view.active_id, &params)?;
@@ -284,10 +295,26 @@ pub fn handler(mut ctx: Context<ManualRebalance>, params: ManualRebalanceParams)
 // Step helpers
 // ---------------------------------------------------------------------------
 
-fn validate_rebalance_params(params: &ManualRebalanceParams) -> Result<()> {
+fn validate_rebalance_params(
+    params: &ManualRebalanceParams,
+    vault_balance_a: u64,
+    vault_balance_b: u64,
+) -> Result<()> {
     require!(
         params.amount_a_max > 0 || params.amount_b_max > 0,
         AargauError::InvalidActionPayload
+    );
+    // Enforce fund sufficiency before any CPI fires. Without this check,
+    // claim_fee2 (Step 1) would succeed and the subsequent add_liquidity
+    // CPI would fail deep inside Meteora with an opaque SPL-token overflow
+    // instead of a clear AargauError::InsufficientFunds.
+    require!(
+        params.amount_a_max <= vault_balance_a,
+        AargauError::InsufficientFunds
+    );
+    require!(
+        params.amount_b_max <= vault_balance_b,
+        AargauError::InsufficientFunds
     );
     require!(
         params.active_id_slippage <= MAX_ACTIVE_BIN_SLIPPAGE_HARD_CAP,
@@ -299,10 +326,6 @@ fn validate_rebalance_params(params: &ManualRebalanceParams) -> Result<()> {
     // the only protection on the new range.
     require_bin_count_within_cap(params.new_lower_bin_id, params.new_upper_bin_id)?;
     require_range_within_inline_bitmap(params.new_lower_bin_id, params.new_upper_bin_id)?;
-    // `BPS_DIVISOR_U16` is referenced only to prove the import path is wired
-    // for parity with `execute_action`; the rebalance itself has no
-    // user-facing bps knob today (the close-side bps is fixed at 100%).
-    let _ = BPS_DIVISOR_U16;
     Ok(())
 }
 
@@ -356,6 +379,15 @@ fn claim_fees_and_route_to_treasury(
     let fee_a = calc_aargau_fee(gross_a, fee_rate_bps)?;
     let fee_b = calc_aargau_fee(gross_b, fee_rate_bps)?;
 
+    // Guard before any CPI: if fee > gross the transaction must abort here,
+    // not after tokens have already been transferred to the treasury.
+    let user_net_a = gross_a
+        .checked_sub(fee_a)
+        .ok_or(error!(AargauError::FeeExceedsGross))?;
+    let user_net_b = gross_b
+        .checked_sub(fee_b)
+        .ok_or(error!(AargauError::FeeExceedsGross))?;
+
     let token_program_key = ctx.accounts.token_program.key();
     let signer_arr: &[&[&[u8]]] = &[&seeds];
 
@@ -384,13 +416,6 @@ fn claim_fees_and_route_to_treasury(
     // CPI sees the correct vault holdings (treasury split already removed).
     ctx.accounts.vault_token_a.reload()?;
     ctx.accounts.vault_token_b.reload()?;
-
-    let user_net_a = gross_a
-        .checked_sub(fee_a)
-        .ok_or(error!(AargauError::FeeExceedsGross))?;
-    let user_net_b = gross_b
-        .checked_sub(fee_b)
-        .ok_or(error!(AargauError::FeeExceedsGross))?;
 
     let clock = Clock::get()?;
     emit!(FeesClaimed {
@@ -533,23 +558,5 @@ fn require_active_position_v2(vault: &VaultAccount, position: &UncheckedAccount<
     require_position_v2(&position.to_account_info())
 }
 
-fn require_bin_count_within_cap(lower_bin_id: i32, upper_bin_id: i32) -> Result<()> {
-    let width = upper_bin_id
-        .checked_sub(lower_bin_id)
-        .and_then(|delta| delta.checked_add(1))
-        .ok_or(AargauError::Overflow)?;
-    require!(
-        width > 0 && width <= MAX_METEORA_BINS,
-        AargauError::TooManyBins
-    );
-    Ok(())
-}
-
-fn require_range_within_inline_bitmap(lower_bin_id: i32, upper_bin_id: i32) -> Result<()> {
-    require!(
-        lower_bin_id >= -METEORA_INLINE_BITMAP_BIN_LIMIT
-            && upper_bin_id <= METEORA_INLINE_BITMAP_BIN_LIMIT,
-        AargauError::BitmapExtensionRequired
-    );
-    Ok(())
-}
+// require_bin_count_within_cap and require_range_within_inline_bitmap are
+// shared with execute_action — they live in utils::vault_ops.
