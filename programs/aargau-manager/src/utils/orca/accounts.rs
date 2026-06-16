@@ -207,6 +207,12 @@ pub fn read_transfer_fee_config(mint_data: &[u8]) -> Option<TransferFeeSnapshot>
     let mut cursor = MINT_EXTENSION_TLV_START;
     while cursor + 4 <= mint_data.len() {
         let ext_type = u16::from_le_bytes([mint_data[cursor], mint_data[cursor + 1]]);
+        // `ExtensionType::Uninitialized` (0) is the TLV terminator in the
+        // canonical spl-token-2022 reader: trailing account padding reads back
+        // as zero type+length, so stop here instead of over-scanning it.
+        if ext_type == 0 {
+            break;
+        }
         let ext_len = u16::from_le_bytes([mint_data[cursor + 2], mint_data[cursor + 3]]) as usize;
         let data_start = cursor + 4;
         let data_end = data_start.checked_add(ext_len)?;
@@ -260,6 +266,11 @@ pub fn require_v2_transferable_mint(mint_data: &[u8]) -> Result<()> {
     let mut cursor = MINT_EXTENSION_TLV_START;
     while cursor + 4 <= mint_data.len() {
         let ext_type = u16::from_le_bytes([mint_data[cursor], mint_data[cursor + 1]]);
+        // `ExtensionType::Uninitialized` (0) terminates the TLV region in the
+        // canonical reader — trailing zero padding is not a real extension.
+        if ext_type == 0 {
+            break;
+        }
         let ext_len = u16::from_le_bytes([mint_data[cursor + 2], mint_data[cursor + 3]]) as usize;
         let data_start = cursor + 4;
         let data_end = match data_start.checked_add(ext_len) {

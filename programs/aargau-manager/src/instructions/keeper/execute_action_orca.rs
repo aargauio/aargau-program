@@ -18,7 +18,10 @@
 //! Token-2022 pair mints are accepted (per-mint detection picks the token
 //! program). Transfer hooks are not wired: the v2 CPIs serialise
 //! `remaining_accounts_info` as `None`, which is correct for plain Token-2022
-//! (transfer-fee-only) mints.
+//! (transfer-fee-only) mints. `OpenPosition` rejects `TransferHook` /
+//! `NonTransferable` pair mints up front; reward collection is best-effort —
+//! an incompatible reward mint is skipped (left in the position), never fatal,
+//! so it can't block LP-fee collection.
 
 use crate::{
     constants::{
@@ -26,7 +29,10 @@ use crate::{
         TOKEN_2022_PROGRAM_ID, TREASURY_SEED,
     },
     errors::AargauError,
-    events::{FeesClaimed, LiquidityChanged, LiquidityOp, PositionClosed, PositionOpened},
+    events::{
+        FeesClaimed, LiquidityChanged, LiquidityOp, PositionClosed, PositionOpened,
+        RewardCollectionSkipped,
+    },
     state::{OrcaKeeperAction, Protocol, ProtocolConfig, TriggeredBy, VaultAccount},
     utils::{
         fee::calc_aargau_fee,
@@ -665,6 +671,17 @@ fn collect_rewards<'info>(
             AargauError::InvalidPoolMint
         );
 
+        // `reward_token_program` is caller-supplied (Anchor-unchecked) and is
+        // both used to derive the expected custody ATA and forwarded into the
+        // CPI. Pin it to the mint's actual owning token program so a caller
+        // cannot derive the ATA under a foreign program id, and so only a real
+        // token program is ever passed downstream.
+        require_keys_eq!(
+            reward_token_program.key(),
+            *reward_mint.owner,
+            AargauError::InvalidRewardOwner
+        );
+
         // Custody bind: rewards must land in the vault's own ATA for the reward
         // mint, never an arbitrary account. The destination is supplied via
         // `remaining_accounts` (unchecked by Anchor).
@@ -674,6 +691,32 @@ fn collect_rewards<'info>(
             &reward_mint.key(),
             &reward_token_program.key(),
         )?;
+
+        // Best-effort reward collection. The v2 CPIs serialise
+        // `remaining_accounts_info = None`, which only services plain
+        // (transfer-fee-only) Token-2022 mints. A reward mint carrying a
+        // `TransferHook` or `NonTransferable` extension would make
+        // `collect_reward_v2` revert and take the ENTIRE `CollectFees`
+        // transaction down with it — including the already-collected LP fees.
+        // Instead, skip the incompatible slot (the reward stays in the Orca
+        // position; the vault still owns it, no funds lost) and emit a skip
+        // event. The exact-count `require!` above stays correct because the
+        // keeper still passes accounts for every active slot — we skip the
+        // CPI, not the accounts, so the remaining-accounts cursor never
+        // desyncs for subsequent slots.
+        if is_token_2022(reward_mint.owner) {
+            let mint_data = reward_mint.try_borrow_data()?;
+            if require_v2_transferable_mint(&mint_data).is_err() {
+                drop(mint_data);
+                emit!(RewardCollectionSkipped {
+                    vault: ctx.accounts.vault.key(),
+                    reward_index: reward_index as u8,
+                    reward_mint: reward_mint.key(),
+                    timestamp: Clock::get()?.unix_timestamp,
+                });
+                continue;
+            }
+        }
 
         let cpi = CollectRewardV2Cpi {
             whirlpool_program: ctx.accounts.whirlpool_program.to_account_info(),

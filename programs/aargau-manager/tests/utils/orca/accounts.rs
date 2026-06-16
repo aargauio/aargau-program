@@ -419,4 +419,58 @@ mod v2_transferable_gate_tests {
             aargau_err_code(AargauError::Token2022NotSupported),
         );
     }
+
+    #[test]
+    fn trailing_zero_padding_after_base_is_treated_as_terminator() {
+        // 166-byte base + a block of zero bytes: extension-type 0
+        // (`Uninitialized`) is the TLV terminator, so the walk stops cleanly
+        // instead of over-scanning padding. A mint with no real extension is
+        // transferable.
+        let mut data = vec![0u8; 166];
+        data.extend_from_slice(&vec![0u8; 64]);
+        assert!(require_v2_transferable_mint(&data).is_ok());
+    }
+
+    #[test]
+    fn extension_after_a_zero_terminator_is_not_reached() {
+        // Canonical TLV semantics: a type-0 terminator stops the walk. Bytes
+        // after it are trailing padding, not a parsable extension — so a hook
+        // accidentally encoded past the terminator is not read. (Real
+        // Token-2022 mints never place a live extension after the terminator;
+        // this pins that the walk stops at type 0 rather than scanning on.)
+        let mut data = vec![0u8; 166];
+        data.extend_from_slice(&0u16.to_le_bytes()); // terminator
+        data.extend_from_slice(&0u16.to_le_bytes()); // (len)
+        data.extend_from_slice(&14u16.to_le_bytes()); // TransferHook past terminator
+        data.extend_from_slice(&0u16.to_le_bytes());
+        assert!(require_v2_transferable_mint(&data).is_ok());
+    }
+
+    // The Orca `CollectFees` reward loop (`collect_rewards`) is best-effort:
+    // before issuing `collect_reward_v2` for a Token-2022 reward mint it runs
+    // this same predicate and SKIPS the slot (emitting `RewardCollectionSkipped`)
+    // when it returns `Err`, instead of letting the CPI revert the whole tx.
+    // These two tests pin the exact skip/collect partition that loop relies on:
+    // incompatible reward mints are skipped, compatible ones are collected.
+    #[test]
+    fn reward_skip_predicate_rejects_incompatible_reward_mints() {
+        // A reward mint with a TransferHook or NonTransferable extension would
+        // revert `collect_reward_v2` (serialised with no remaining-accounts
+        // info) — the loop skips these slots.
+        assert!(require_v2_transferable_mint(&mint_with_extension(14)).is_err());
+        assert!(require_v2_transferable_mint(&mint_with_extension(9)).is_err());
+    }
+
+    #[test]
+    fn reward_skip_predicate_collects_compatible_reward_mints() {
+        // Classic SPL and transfer-fee-only Token-2022 reward mints are
+        // serviceable by the v2 CPI — the loop collects these slots normally.
+        let body_len = 108usize;
+        let mut fee_only = vec![0u8; 166];
+        fee_only.extend_from_slice(&1u16.to_le_bytes());
+        fee_only.extend_from_slice(&(body_len as u16).to_le_bytes());
+        fee_only.extend_from_slice(&vec![0u8; body_len]);
+        assert!(require_v2_transferable_mint(&vec![0u8; 82]).is_ok());
+        assert!(require_v2_transferable_mint(&fee_only).is_ok());
+    }
 }
