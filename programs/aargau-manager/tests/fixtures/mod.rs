@@ -28,6 +28,9 @@ use std::path::{Path, PathBuf};
 /// File name of the pinned Meteora DLMM program binary inside `tests/fixtures/`.
 pub const METEORA_DLMM_FIXTURE_FILENAME: &str = "meteora_dlmm.so";
 
+/// File name of the pinned Orca Whirlpools program binary inside `tests/fixtures/`.
+pub const ORCA_WHIRLPOOLS_FIXTURE_FILENAME: &str = "orca_whirlpools.so";
+
 /// Absolute path to the fixtures directory inside the test binary.
 ///
 /// Resolved via `CARGO_MANIFEST_DIR` so the lookup works regardless of the
@@ -50,6 +53,25 @@ pub fn load_meteora_dlmm_program() -> Result<Vec<u8>, String> {
             "Meteora DLMM fixture not found at {}. \
              Dump it with: \
              `solana program dump LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo {} --url mainnet-beta`",
+            path.display(),
+            path.display(),
+        ));
+    }
+    std::fs::read(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))
+}
+
+/// Returns the raw bytes of the pinned Orca Whirlpools program.
+///
+/// Like the Meteora loader, returns `Err` with an instructive `solana program
+/// dump` command when the file is missing, so contributors without the
+/// fixture can still run the rest of the suite.
+pub fn load_whirlpools_program() -> Result<Vec<u8>, String> {
+    let path = fixtures_dir().join(ORCA_WHIRLPOOLS_FIXTURE_FILENAME);
+    if !path.exists() {
+        return Err(format!(
+            "Orca Whirlpools fixture not found at {}. \
+             Dump it with: \
+             `solana program dump whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc {} --url mainnet-beta`",
             path.display(),
             path.display(),
         ));

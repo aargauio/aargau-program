@@ -1,5 +1,6 @@
 pub mod fee;
 pub mod meteora;
+pub mod orca;
 pub mod pool_validation;
 pub mod signer_seeds;
 pub mod vault_ops;

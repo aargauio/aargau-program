@@ -16,6 +16,9 @@
 //! - `set_protocol_pause` — admin kill switch
 //! - `execute_action` — keeper-style Meteora DLMM vault operations
 //!   (CollectFees, IncreaseLiquidity, DecreaseLiquidity, OpenPosition, ClosePosition)
+//! - `execute_action_orca` — Orca Whirlpools position lifecycle
+//!   (OpenPosition, IncreaseLiquidity, DecreaseLiquidity, CollectFees+rewards, ClosePosition);
+//!   Token-2022 position NFT + v2 token path
 //! - `manual_rebalance` — user-signed atomic Meteora DLMM rebalance
 //!   (claim_fee2 + rebalance_liquidity in one transaction)
 //!
@@ -149,6 +152,13 @@ pub mod aargau_manager {
 
     pub fn execute_action(ctx: Context<ExecuteAction>, params: ExecuteActionParams) -> Result<()> {
         execute_action::handler(ctx, params)
+    }
+
+    pub fn execute_action_orca<'info>(
+        ctx: Context<'info, ExecuteActionOrca<'info>>,
+        params: ExecuteActionOrcaParams,
+    ) -> Result<()> {
+        execute_action_orca::handler(ctx, params)
     }
 
     pub fn report_rebalance_attempt(

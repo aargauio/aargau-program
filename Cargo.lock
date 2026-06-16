@@ -10,6 +10,7 @@ dependencies = [
  "anchor-spl",
  "borsh",
  "mollusk-svm",
+ "sha2 0.10.9",
  "solana-program",
 ]
 

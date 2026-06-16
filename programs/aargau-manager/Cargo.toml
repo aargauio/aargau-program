@@ -32,6 +32,9 @@ borsh = "1.5"
 # test binary to load pinned `.so` programs (e.g. Meteora DLMM) into an
 # in-process executor without spinning up `solana-test-validator`.
 mollusk-svm = "=0.12.1-agave-4.0"
+# Re-derive Anchor 8-byte discriminators in wire tests as
+# `sha256("global:<name>")[..8]`, pinning them against the baked-in constants.
+sha2 = "0.10"
 
 [[test]]
 name = "integration"
