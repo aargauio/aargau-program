@@ -27,7 +27,7 @@ pub const WHIRLPOOL_TOKEN_VAULT_B_OFFSET: usize = 213;
 
 // RewardInfo array starts at byte 269 (after fee_growth_global_b[16] +
 // reward_last_updated_timestamp[8]); each RewardInfo is 128 bytes laid out as
-// [mint:32][vault:32][authority:32][emissions_per_second_x64:16][growth_global_x64:16].
+// [mint:32][vault:32][extension:32][emissions_per_second_x64:16][growth_global_x64:16].
 pub const WHIRLPOOL_REWARD_INFOS_OFFSET: usize = 269;
 pub const WHIRLPOOL_REWARD_INFO_STRIDE: usize = 128;
 pub const WHIRLPOOL_REWARD_VAULT_RELATIVE_OFFSET: usize = 32;

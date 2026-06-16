@@ -348,3 +348,75 @@ mod position_discriminator_tests {
         assert!(validate_position_discriminator(&data).is_err());
     }
 }
+
+mod v2_transferable_gate_tests {
+    use crate::common::error_helpers::{aargau_err_code, err_code};
+    use aargau_manager::errors::AargauError;
+    use aargau_manager::utils::orca::accounts::require_v2_transferable_mint;
+
+    // Build a Token-2022 mint buffer (166-byte base) with a single extension
+    // of the given type and a zero-length body.
+    fn mint_with_extension(ext_type: u16) -> Vec<u8> {
+        let mut data = vec![0u8; 166];
+        data.extend_from_slice(&ext_type.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn classic_spl_mint_passes() {
+        // Classic SPL mint = 82 bytes, no extension area.
+        assert!(require_v2_transferable_mint(&vec![0u8; 82]).is_ok());
+    }
+
+    #[test]
+    fn transfer_fee_only_mint_passes() {
+        // TransferFeeConfig (type 1) is the supported Token-2022 extension.
+        let body_len = 108usize;
+        let mut data = vec![0u8; 166];
+        data.extend_from_slice(&1u16.to_le_bytes());
+        data.extend_from_slice(&(body_len as u16).to_le_bytes());
+        data.extend_from_slice(&vec![0u8; body_len]);
+        assert!(require_v2_transferable_mint(&data).is_ok());
+    }
+
+    #[test]
+    fn transfer_hook_mint_is_rejected() {
+        // TransferHook = type 14.
+        let data = mint_with_extension(14);
+        let err = require_v2_transferable_mint(&data).unwrap_err();
+        assert_eq!(
+            err_code(&err),
+            aargau_err_code(AargauError::Token2022NotSupported),
+        );
+    }
+
+    #[test]
+    fn non_transferable_mint_is_rejected() {
+        // NonTransferable = type 9.
+        let data = mint_with_extension(9);
+        let err = require_v2_transferable_mint(&data).unwrap_err();
+        assert_eq!(
+            err_code(&err),
+            aargau_err_code(AargauError::NonTransferableMint),
+        );
+    }
+
+    #[test]
+    fn transfer_hook_after_a_preceding_extension_is_rejected() {
+        // TransferFeeConfig (skipped) then TransferHook — the cursor must walk
+        // past the first extension and still catch the hook.
+        let body_len = 108usize;
+        let mut data = vec![0u8; 166];
+        data.extend_from_slice(&1u16.to_le_bytes());
+        data.extend_from_slice(&(body_len as u16).to_le_bytes());
+        data.extend_from_slice(&vec![0u8; body_len]);
+        data.extend_from_slice(&14u16.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+        let err = require_v2_transferable_mint(&data).unwrap_err();
+        assert_eq!(
+            err_code(&err),
+            aargau_err_code(AargauError::Token2022NotSupported),
+        );
+    }
+}

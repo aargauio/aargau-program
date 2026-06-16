@@ -180,6 +180,20 @@ const TRANSFER_FEE_CONFIG_EXTENSION_TYPE: u16 = 1;
 const TRANSFER_FEE_NEWER_MAX_FEE_OFFSET: usize = 98;
 const TRANSFER_FEE_NEWER_BPS_OFFSET: usize = 106;
 
+// Token-2022 mint-side extension type IDs (SPL Token-2022 `ExtensionType`,
+// numbered from 0 = Uninitialized). Verified against the spl-token-2022
+// `ExtensionType` enum ordering. Only the two that block the v2 transfer path
+// are relevant here:
+//   NonTransferable = 9  → the token program rejects every transfer, so the
+//                          position could be opened but never decreased,
+//                          fee-collected, or closed (funds locked).
+//   TransferHook    = 14 → the transfer requires extra accounts; our v2 CPIs
+//                          serialise `remaining_accounts_info = None` and
+//                          append nothing, so the hook program is never
+//                          invoked and the token program rejects the transfer.
+const NON_TRANSFERABLE_EXTENSION_TYPE: u16 = 9;
+const TRANSFER_HOOK_EXTENSION_TYPE: u16 = 14;
+
 /// Read the Token-2022 `TransferFeeConfig` (newer epoch fee) for a mint, if
 /// present. SPL classic mints (≤165 bytes) and Token-2022 mints without the
 /// extension return `None`. Never panics on malformed input.
@@ -224,4 +238,46 @@ pub fn read_transfer_fee_config(mint_data: &[u8]) -> Option<TransferFeeSnapshot>
         cursor = data_end;
     }
     None
+}
+
+/// Reject a mint that carries a Token-2022 extension incompatible with the v2
+/// transfer path the vault uses for `decrease_liquidity_v2` /
+/// `collect_fees_v2` / `close_position`.
+///
+/// `NonTransferable` mints can never be moved at all; `TransferHook` mints
+/// require extra accounts that our CPIs do not assemble
+/// (`remaining_accounts_info = None`). Either would let a position be opened
+/// but never wound down — locking funds. Enforced at `OpenPosition` so the
+/// vault never enters that state.
+///
+/// SPL-classic mints (≤165 bytes, no TLV) and Token-2022 mints carrying only
+/// supported extensions (e.g. transfer-fee-only) pass. Models the cursor walk
+/// on `read_transfer_fee_config`: bounds-checked, monotonic, never panics.
+pub fn require_v2_transferable_mint(mint_data: &[u8]) -> Result<()> {
+    if mint_data.len() <= 165 {
+        return Ok(());
+    }
+    let mut cursor = MINT_EXTENSION_TLV_START;
+    while cursor + 4 <= mint_data.len() {
+        let ext_type = u16::from_le_bytes([mint_data[cursor], mint_data[cursor + 1]]);
+        let ext_len = u16::from_le_bytes([mint_data[cursor + 2], mint_data[cursor + 3]]) as usize;
+        let data_start = cursor + 4;
+        let data_end = match data_start.checked_add(ext_len) {
+            Some(end) => end,
+            None => return Ok(()),
+        };
+        if data_end > mint_data.len() {
+            return Ok(());
+        }
+        require!(
+            ext_type != NON_TRANSFERABLE_EXTENSION_TYPE,
+            AargauError::NonTransferableMint
+        );
+        require!(
+            ext_type != TRANSFER_HOOK_EXTENSION_TYPE,
+            AargauError::Token2022NotSupported
+        );
+        cursor = data_end;
+    }
+    Ok(())
 }

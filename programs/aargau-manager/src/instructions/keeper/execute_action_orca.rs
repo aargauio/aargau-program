@@ -34,7 +34,7 @@ use crate::{
             accounts::{
                 derive_position_pda, derive_tick_array_pda, is_token_2022,
                 read_transfer_fee_config, require_orca_position, require_reward_owner_is_vault_ata,
-                tick_array_start_index,
+                require_v2_transferable_mint, tick_array_start_index,
             },
             close_position::{
                 invoke_close_position_with_token_extensions, ClosePositionWithTokenExtensionsCpi,
@@ -77,9 +77,11 @@ pub struct ExecuteActionOrcaParams {
 /// stable; only `CollectFees` writes to them.
 ///
 /// Two token programs (`token_program_a`/`b`) carry the per-mint SPL-or-
-/// Token-2022 program. `token_program` is used for the Aargau fee transfers
-/// and must own the mint being transferred. The position NFT mint + its ATA
-/// are always under Token-2022.
+/// Token-2022 program; each Aargau fee leg routes its `transfer_checked`
+/// through the program that owns that leg's mint. The standalone
+/// `token_program` account is reserved/unused (kept to preserve the wire
+/// shape for off-chain builders). The position NFT mint + its ATA are always
+/// under Token-2022.
 #[derive(Accounts)]
 pub struct ExecuteActionOrca<'info> {
     /// Vault owner — must equal `vault.user_authority`. Funds the position on
@@ -311,6 +313,12 @@ fn handle_open_position(
         &ctx.accounts.tick_array_upper.key(),
     )?;
 
+    // Reject pair mints carrying a TransferHook or NonTransferable extension.
+    // The vault's v2 CPIs serialise `remaining_accounts_info = None`, so such a
+    // position could be opened but never decreased / fee-collected / closed —
+    // funds would be locked. Gate at open before any state is written.
+    require_pair_mints_v2_transferable(ctx)?;
+
     let seed_bytes = VaultSignerSeedBytes::new(&ctx.accounts.vault);
     let seeds = seed_bytes.seeds();
 
@@ -478,12 +486,13 @@ fn handle_collect_fees<'info>(
     };
     invoke_collect_fees_v2(&fees_cpi, &seeds)?;
 
-    // Sweep active reward slots. The caller appends 4 accounts per active slot
-    // to `remaining_accounts`; we match them positionally against the
-    // whirlpool's reward triplets (active slots = vault != default).
-    collect_rewards(ctx, view, &seeds)?;
-
-    // Refresh balances after all collect CPIs so we observe the full delta.
+    // Measure the LP-fee delta NOW — before rewards are collected. When a
+    // reward mint equals a pair mint, its `collect_reward_v2` destination ATA
+    // is `vault_token_a`/`vault_token_b`, so collecting rewards first would
+    // fold reward proceeds into the gross figures and tax them at the LP
+    // performance-fee rate (over-charging the user) and mix fees + rewards in
+    // the emitted `FeesClaimed.gross_*`. Snapshot the delta against the
+    // pre-collect baseline so the fee base reflects ONLY true LP fees.
     ctx.accounts.vault_token_a.reload()?;
     ctx.accounts.vault_token_b.reload()?;
     let gross_a = ctx
@@ -498,6 +507,12 @@ fn handle_collect_fees<'info>(
         .amount
         .checked_sub(pre_b)
         .ok_or(error!(AargauError::PostCpiBalanceDecreased))?;
+
+    // Sweep active reward slots AFTER the fee base is fixed. The caller appends
+    // 4 accounts per active slot to `remaining_accounts`; we match them
+    // positionally against the whirlpool's reward triplets (active slots =
+    // vault != default). Reward proceeds are not subject to the LP fee.
+    collect_rewards(ctx, view, &seeds)?;
 
     let fee_rate_bps = ctx.accounts.protocol_config.fee_rate_bps;
     let fee_a = calc_aargau_fee(gross_a, fee_rate_bps)?;
@@ -763,6 +778,20 @@ fn transfer_performance_fee<'info>(
 /// Snapshot the Token-2022 transfer-fee config for both pair mints onto the
 /// vault. `uses_token_2022` is set when either mint is Token-2022. SPL classic
 /// mints (or Token-2022 without the extension) leave the fields at zero.
+/// Reject either pair mint if it is a Token-2022 mint carrying a TransferHook
+/// or NonTransferable extension (see `require_v2_transferable_mint`). SPL
+/// classic mints are skipped — they have no extension TLV.
+fn require_pair_mints_v2_transferable(ctx: &Context<ExecuteActionOrca>) -> Result<()> {
+    for mint in [&ctx.accounts.mint_a, &ctx.accounts.mint_b] {
+        let info = mint.to_account_info();
+        if is_token_2022(info.owner) {
+            let data = info.try_borrow_data()?;
+            require_v2_transferable_mint(&data)?;
+        }
+    }
+    Ok(())
+}
+
 fn snapshot_transfer_fees(ctx: &mut Context<ExecuteActionOrca>) -> Result<()> {
     let mint_a_is_2022 = is_token_2022(ctx.accounts.mint_a.to_account_info().owner);
     let mint_b_is_2022 = is_token_2022(ctx.accounts.mint_b.to_account_info().owner);
