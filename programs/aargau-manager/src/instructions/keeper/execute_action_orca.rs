@@ -33,7 +33,8 @@ use crate::{
         orca::{
             accounts::{
                 derive_position_pda, derive_tick_array_pda, is_token_2022,
-                read_transfer_fee_config, require_orca_position, tick_array_start_index,
+                read_transfer_fee_config, require_orca_position, require_reward_owner_is_vault_ata,
+                tick_array_start_index,
             },
             close_position::{
                 invoke_close_position_with_token_extensions, ClosePositionWithTokenExtensionsCpi,
@@ -174,8 +175,11 @@ pub struct ExecuteActionOrca<'info> {
     pub token_program_a: Interface<'info, TokenInterface>,
     /// Token program for mint B (SPL classic or Token-2022).
     pub token_program_b: Interface<'info, TokenInterface>,
-    /// Token program used by the Aargau performance-fee transfers; must own the
-    /// mint being transferred.
+    /// Reserved — currently unused. Performance-fee transfers now route each
+    /// mint leg through its per-mint program (`token_program_a` / `_b`), since a
+    /// mixed Whirlpools pool can have the two mints under different token
+    /// programs. Kept in the account list to keep the instruction wire shape
+    /// stable for off-chain instruction builders.
     pub token_program: Interface<'info, TokenInterface>,
 
     /// CHECK: must equal the Token-2022 program (position NFT mint + ATA).
@@ -506,11 +510,14 @@ fn handle_collect_fees<'info>(
         .checked_sub(fee_b)
         .ok_or(error!(AargauError::FeeExceedsGross))?;
 
-    let token_program_key = ctx.accounts.token_program.key();
     let signer_arr: &[&[&[u8]]] = &[&seeds];
 
+    // Each mint leg uses its own token program: `mint_a` and `mint_b` may live
+    // under different token programs (one SPL-classic, one Token-2022) in a
+    // mixed Whirlpools pool. The transferring program must own the mint, so the
+    // fee CPI for each leg is routed through that leg's per-mint program.
     transfer_performance_fee(
-        token_program_key,
+        ctx.accounts.token_program_a.key(),
         ctx.accounts.vault_token_a.to_account_info(),
         ctx.accounts.mint_a.to_account_info(),
         ctx.accounts.treasury_token_a.to_account_info(),
@@ -520,7 +527,7 @@ fn handle_collect_fees<'info>(
         signer_arr,
     )?;
     transfer_performance_fee(
-        token_program_key,
+        ctx.accounts.token_program_b.key(),
         ctx.accounts.vault_token_b.to_account_info(),
         ctx.accounts.mint_b.to_account_info(),
         ctx.accounts.treasury_token_b.to_account_info(),
@@ -642,6 +649,16 @@ fn collect_rewards<'info>(
             view.rewards[reward_index].mint,
             AargauError::InvalidPoolMint
         );
+
+        // Custody bind: rewards must land in the vault's own ATA for the reward
+        // mint, never an arbitrary account. The destination is supplied via
+        // `remaining_accounts` (unchecked by Anchor).
+        require_reward_owner_is_vault_ata(
+            &reward_owner_account.key(),
+            &ctx.accounts.vault.key(),
+            &reward_mint.key(),
+            &reward_token_program.key(),
+        )?;
 
         let cpi = CollectRewardV2Cpi {
             whirlpool_program: ctx.accounts.whirlpool_program.to_account_info(),

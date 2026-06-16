@@ -100,6 +100,9 @@ pub enum AargauError {
     #[msg("Computed performance fee exceeds gross amount")]
     FeeExceedsGross = 1307,
 
+    #[msg("Reward destination is not the vault's associated token account for the reward mint")]
+    InvalidRewardOwner = 1308,
+
     // --- Protocol state (1400–1499) ---
     #[msg("Program is paused — only emergency_withdraw, withdraw, and close_vault are allowed")]
     ProgramPaused = 1400,

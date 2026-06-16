@@ -176,6 +176,149 @@ mod transfer_fee_reader_tests {
     }
 }
 
+mod reward_owner_bind_tests {
+    use crate::common::error_helpers::{aargau_err_code, err_code};
+    use aargau_manager::constants::TOKEN_2022_PROGRAM_ID;
+    use aargau_manager::errors::AargauError;
+    use aargau_manager::utils::orca::accounts::require_reward_owner_is_vault_ata;
+    use anchor_lang::prelude::Pubkey;
+
+    fn fixed(byte: u8) -> Pubkey {
+        Pubkey::new_from_array([byte; 32])
+    }
+
+    fn spl_token_program() -> Pubkey {
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            .parse()
+            .unwrap()
+    }
+
+    /// The vault's ATA for the reward mint (SPL classic) is accepted.
+    #[test]
+    fn accepts_vault_ata_under_spl_token() {
+        let vault = fixed(0x21);
+        let reward_mint = fixed(0x22);
+        let token_program = spl_token_program();
+        let expected = anchor_spl::associated_token::get_associated_token_address_with_program_id(
+            &vault,
+            &reward_mint,
+            &token_program,
+        );
+        assert!(
+            require_reward_owner_is_vault_ata(&expected, &vault, &reward_mint, &token_program)
+                .is_ok()
+        );
+    }
+
+    /// The same derivation under the Token-2022 program yields a DIFFERENT ATA
+    /// and the bind accepts the Token-2022 one — pinning the program-id-aware
+    /// derivation for mixed pools.
+    #[test]
+    fn accepts_vault_ata_under_token_2022_and_differs_from_spl() {
+        let vault = fixed(0x31);
+        let reward_mint = fixed(0x32);
+        let spl = spl_token_program();
+
+        let ata_spl = anchor_spl::associated_token::get_associated_token_address_with_program_id(
+            &vault,
+            &reward_mint,
+            &spl,
+        );
+        let ata_t22 = anchor_spl::associated_token::get_associated_token_address_with_program_id(
+            &vault,
+            &reward_mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+        // The token program is part of the ATA derivation, so the two differ.
+        assert_ne!(ata_spl, ata_t22);
+
+        assert!(require_reward_owner_is_vault_ata(
+            &ata_t22,
+            &vault,
+            &reward_mint,
+            &TOKEN_2022_PROGRAM_ID,
+        )
+        .is_ok());
+    }
+
+    /// An arbitrary destination (not the vault's ATA) is rejected — this is the
+    /// custody gap the bind closes for the `remaining_accounts` reward path.
+    #[test]
+    fn rejects_arbitrary_reward_owner() {
+        let vault = fixed(0x41);
+        let reward_mint = fixed(0x42);
+        let token_program = spl_token_program();
+        let attacker_owned = fixed(0xAA);
+
+        let err = require_reward_owner_is_vault_ata(
+            &attacker_owned,
+            &vault,
+            &reward_mint,
+            &token_program,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err_code(&err),
+            aargau_err_code(AargauError::InvalidRewardOwner),
+        );
+    }
+
+    /// The vault's ATA for the wrong mint is also rejected — binding is per
+    /// (vault, mint, program), not just per vault.
+    #[test]
+    fn rejects_vault_ata_of_wrong_mint() {
+        let vault = fixed(0x51);
+        let reward_mint = fixed(0x52);
+        let other_mint = fixed(0x53);
+        let token_program = spl_token_program();
+
+        let wrong_mint_ata =
+            anchor_spl::associated_token::get_associated_token_address_with_program_id(
+                &vault,
+                &other_mint,
+                &token_program,
+            );
+        let err = require_reward_owner_is_vault_ata(
+            &wrong_mint_ata,
+            &vault,
+            &reward_mint,
+            &token_program,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err_code(&err),
+            aargau_err_code(AargauError::InvalidRewardOwner),
+        );
+    }
+
+    /// The correctly-derived ATA but under the WRONG token program is rejected
+    /// — covers the mixed-pool case where the program id is mis-supplied.
+    #[test]
+    fn rejects_correct_mint_wrong_token_program() {
+        let vault = fixed(0x61);
+        let reward_mint = fixed(0x62);
+        let spl = spl_token_program();
+
+        // Caller claims Token-2022 but passes the SPL-derived ATA.
+        let spl_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(
+            &vault,
+            &reward_mint,
+            &spl,
+        );
+        let err = require_reward_owner_is_vault_ata(
+            &spl_ata,
+            &vault,
+            &reward_mint,
+            &TOKEN_2022_PROGRAM_ID,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err_code(&err),
+            aargau_err_code(AargauError::InvalidRewardOwner),
+        );
+    }
+}
+
 mod position_discriminator_tests {
     use crate::common::error_helpers::{aargau_err_code, err_code};
     use aargau_manager::constants::ORCA_POSITION_DISCRIMINATOR;

@@ -94,6 +94,17 @@ mod execute_action_orca_replay {
 
     /// CollectFees sweeps fees (v2) + active rewards (v2), routes the fee split
     /// to the treasury ATAs.
+    ///
+    /// Replay must assert, against a MIXED pool (one mint SPL-classic, the other
+    /// Token-2022), that each performance-fee `transfer_checked` leg is invoked
+    /// against that leg's own token program (`token_program_a` for the mint_a
+    /// leg, `token_program_b` for the mint_b leg). Passing a single shared
+    /// token program for both legs makes one `transfer_checked` fail because the
+    /// program does not own that mint — the bug this gate guards against.
+    /// Reward destinations are bound to the vault's ATA for each reward mint
+    /// (see `require_reward_owner_is_vault_ata` wire tests in
+    /// `tests/utils/orca/accounts.rs`); the replay confirms rewards land in
+    /// vault custody.
     #[test]
     #[ignore = "requires orca_whirlpools.so fixture"]
     fn collect_fees_and_rewards() {

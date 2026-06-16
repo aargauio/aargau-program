@@ -109,6 +109,34 @@ pub fn require_orca_position(account: &AccountInfo<'_>) -> Result<()> {
     validate_position_discriminator(&data)
 }
 
+/// Custody bind for Orca reward collection: the destination that
+/// `collect_reward_v2` pays into must be the vault PDA's own associated token
+/// account for the reward mint. The destination is supplied via
+/// `remaining_accounts` (which Anchor does not validate), so without this check
+/// a caller could route rewards into an arbitrary account it controls.
+///
+/// Uses the program-id-aware ATA derivation so an SPL-classic and a Token-2022
+/// reward mint each resolve to their correct ATA. Returns `InvalidRewardOwner`
+/// on mismatch.
+pub fn require_reward_owner_is_vault_ata(
+    reward_owner_account: &Pubkey,
+    vault: &Pubkey,
+    reward_mint: &Pubkey,
+    reward_token_program: &Pubkey,
+) -> Result<()> {
+    let expected = anchor_spl::associated_token::get_associated_token_address_with_program_id(
+        vault,
+        reward_mint,
+        reward_token_program,
+    );
+    require_keys_eq!(
+        *reward_owner_account,
+        expected,
+        AargauError::InvalidRewardOwner
+    );
+    Ok(())
+}
+
 /// Returns `true` when a mint account is owned by the Token-2022 program.
 ///
 /// Per-mint detection drives which token program is forwarded to each `_v2`
