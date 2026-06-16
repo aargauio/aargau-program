@@ -78,30 +78,55 @@ mod build_collect_fees_v2_tests {
         assert_eq!(data.len(), 8 + 1);
     }
 
+    // Role markers — each argument gets a UNIQUE byte so we can assert the
+    // builder placed it at the index the authoritative struct demands. This is
+    // independent of the builder: the expected sequence below is transcribed by
+    // hand from CollectFeesV2 `#[derive(Accounts)]`, so a builder reordering
+    // (e.g. the old ModifyLiquidityV2 layout) makes the pubkey at some index
+    // mismatch and the test fails.
+    const WHIRLPOOL: u8 = 0x01;
+    const TOKEN_PROGRAM_A: u8 = 0x02;
+    const TOKEN_PROGRAM_B: u8 = 0x03;
+    const MEMO_PROGRAM: u8 = 0x04;
+    const POSITION_AUTHORITY: u8 = 0x05;
+    const POSITION: u8 = 0x06;
+    const POSITION_TOKEN_ACCOUNT: u8 = 0x07;
+    const TOKEN_MINT_A: u8 = 0x08;
+    const TOKEN_MINT_B: u8 = 0x09;
+    const TOKEN_OWNER_ACCOUNT_A: u8 = 0x0a;
+    const TOKEN_OWNER_ACCOUNT_B: u8 = 0x0b;
+    const TOKEN_VAULT_A: u8 = 0x0c;
+    const TOKEN_VAULT_B: u8 = 0x0d;
+
     #[test]
     fn account_meta_order_matches_collect_fees_v2() {
         let (_, m) = build();
-        assert_eq!(m.len(), 13);
-        for (idx, meta) in m.iter().enumerate() {
-            assert_eq!(meta.pubkey, fixed(0x01 + idx as u8));
-        }
-        // whirlpool: writable
-        assert!(m[0].is_writable && !m[0].is_signer);
-        // token programs + memo: readonly
-        for idx in [1, 2, 3] {
-            assert!(!m[idx].is_writable && !m[idx].is_signer);
-        }
-        // position_authority: readonly + signer
-        assert!(m[4].is_signer && !m[4].is_writable);
-        // position: writable
-        assert!(m[5].is_writable);
-        // position_token_account + mints: readonly
-        for idx in [6, 7, 8] {
-            assert!(!m[idx].is_writable && !m[idx].is_signer);
-        }
-        // owner accounts + pool vaults: writable
-        for idx in [9, 10, 11, 12] {
-            assert!(m[idx].is_writable && !m[idx].is_signer, "slot {idx}");
+
+        // Expected (role_byte, is_writable, is_signer) transcribed verbatim from
+        // orca-so/whirlpools programs/whirlpool/src/instructions/v2/collect_fees.rs
+        // CollectFeesV2. NOTE: whirlpool is readonly here (Box<Account>, no mut),
+        // token programs + memo are LAST, and A/B owner+vault pairs interleave.
+        let expected: [(u8, bool, bool); 13] = [
+            (WHIRLPOOL, false, false),
+            (POSITION_AUTHORITY, false, true),
+            (POSITION, true, false),
+            (POSITION_TOKEN_ACCOUNT, false, false),
+            (TOKEN_MINT_A, false, false),
+            (TOKEN_MINT_B, false, false),
+            (TOKEN_OWNER_ACCOUNT_A, true, false),
+            (TOKEN_VAULT_A, true, false),
+            (TOKEN_OWNER_ACCOUNT_B, true, false),
+            (TOKEN_VAULT_B, true, false),
+            (TOKEN_PROGRAM_A, false, false),
+            (TOKEN_PROGRAM_B, false, false),
+            (MEMO_PROGRAM, false, false),
+        ];
+
+        assert_eq!(m.len(), expected.len());
+        for (idx, (role, writable, signer)) in expected.iter().enumerate() {
+            assert_eq!(m[idx].pubkey, fixed(*role), "pubkey at slot {idx}");
+            assert_eq!(m[idx].is_writable, *writable, "is_writable at slot {idx}");
+            assert_eq!(m[idx].is_signer, *signer, "is_signer at slot {idx}");
         }
     }
 }
@@ -140,28 +165,41 @@ mod build_collect_reward_v2_tests {
         assert_eq!(data.len(), 8 + 1 + 1);
     }
 
+    // Role markers — unique byte per builder argument (see build() arg order).
+    const WHIRLPOOL: u8 = 0x01;
+    const POSITION_AUTHORITY: u8 = 0x02;
+    const POSITION: u8 = 0x03;
+    const POSITION_TOKEN_ACCOUNT: u8 = 0x04;
+    const REWARD_OWNER_ACCOUNT: u8 = 0x05;
+    const REWARD_MINT: u8 = 0x06;
+    const REWARD_VAULT: u8 = 0x07;
+    const REWARD_TOKEN_PROGRAM: u8 = 0x08;
+    const MEMO_PROGRAM: u8 = 0x09;
+
     #[test]
     fn account_meta_order_matches_collect_reward_v2() {
         let (_, m) = build(0);
-        assert_eq!(m.len(), 9);
-        for (idx, meta) in m.iter().enumerate() {
-            assert_eq!(meta.pubkey, fixed(0x01 + idx as u8));
+
+        // Expected (role_byte, is_writable, is_signer) transcribed verbatim from
+        // orca-so/whirlpools programs/whirlpool/src/instructions/v2/collect_reward.rs
+        // CollectRewardV2. whirlpool is readonly (Box<Account>, no mut).
+        let expected: [(u8, bool, bool); 9] = [
+            (WHIRLPOOL, false, false),
+            (POSITION_AUTHORITY, false, true),
+            (POSITION, true, false),
+            (POSITION_TOKEN_ACCOUNT, false, false),
+            (REWARD_OWNER_ACCOUNT, true, false),
+            (REWARD_MINT, false, false),
+            (REWARD_VAULT, true, false),
+            (REWARD_TOKEN_PROGRAM, false, false),
+            (MEMO_PROGRAM, false, false),
+        ];
+
+        assert_eq!(m.len(), expected.len());
+        for (idx, (role, writable, signer)) in expected.iter().enumerate() {
+            assert_eq!(m[idx].pubkey, fixed(*role), "pubkey at slot {idx}");
+            assert_eq!(m[idx].is_writable, *writable, "is_writable at slot {idx}");
+            assert_eq!(m[idx].is_signer, *signer, "is_signer at slot {idx}");
         }
-        // whirlpool: writable
-        assert!(m[0].is_writable && !m[0].is_signer);
-        // position_authority: readonly + signer
-        assert!(m[1].is_signer && !m[1].is_writable);
-        // position: writable
-        assert!(m[2].is_writable);
-        // position_token_account: readonly
-        assert!(!m[3].is_writable && !m[3].is_signer);
-        // reward_owner_account: writable
-        assert!(m[4].is_writable);
-        // reward_mint: readonly
-        assert!(!m[5].is_writable);
-        // reward_vault: writable
-        assert!(m[6].is_writable);
-        // reward_token_program + memo: readonly
-        assert!(!m[7].is_writable && !m[8].is_writable);
     }
 }

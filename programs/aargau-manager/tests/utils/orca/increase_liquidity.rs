@@ -74,38 +74,53 @@ mod build_increase_liquidity_v2_tests {
         assert_eq!(data.len(), 8 + 16 + 8 + 8 + 1);
     }
 
-    #[test]
-    fn account_meta_order_matches_modify_liquidity_v2() {
-        let (_, m) = build(1, 1, 1);
-        assert_eq!(m.len(), 15);
-        for (idx, meta) in m.iter().enumerate() {
-            assert_eq!(meta.pubkey, fixed(0x01 + idx as u8), "slot {idx} pubkey");
-        }
-    }
+    // Role markers — unique byte per builder argument (see build() arg order).
+    const WHIRLPOOL: u8 = 0x01;
+    const TOKEN_PROGRAM_A: u8 = 0x02;
+    const TOKEN_PROGRAM_B: u8 = 0x03;
+    const MEMO_PROGRAM: u8 = 0x04;
+    const POSITION_AUTHORITY: u8 = 0x05;
+    const POSITION: u8 = 0x06;
+    const POSITION_TOKEN_ACCOUNT: u8 = 0x07;
+    const TOKEN_MINT_A: u8 = 0x08;
+    const TOKEN_MINT_B: u8 = 0x09;
+    const TOKEN_OWNER_ACCOUNT_A: u8 = 0x0a;
+    const TOKEN_OWNER_ACCOUNT_B: u8 = 0x0b;
+    const TOKEN_VAULT_A: u8 = 0x0c;
+    const TOKEN_VAULT_B: u8 = 0x0d;
+    const TICK_ARRAY_LOWER: u8 = 0x0e;
+    const TICK_ARRAY_UPPER: u8 = 0x0f;
 
     #[test]
-    fn flags_match_on_chain_layout() {
+    fn account_meta_order_and_flags_match_modify_liquidity_v2() {
+        // Expected (role_byte, is_writable, is_signer) transcribed verbatim from
+        // orca-so/whirlpools programs/whirlpool/src/instructions/v2/increase_liquidity.rs
+        // ModifyLiquidityV2. whirlpool IS `#[account(mut)]` here (unlike the
+        // collect instructions).
+        let expected: [(u8, bool, bool); 15] = [
+            (WHIRLPOOL, true, false),
+            (TOKEN_PROGRAM_A, false, false),
+            (TOKEN_PROGRAM_B, false, false),
+            (MEMO_PROGRAM, false, false),
+            (POSITION_AUTHORITY, false, true),
+            (POSITION, true, false),
+            (POSITION_TOKEN_ACCOUNT, false, false),
+            (TOKEN_MINT_A, false, false),
+            (TOKEN_MINT_B, false, false),
+            (TOKEN_OWNER_ACCOUNT_A, true, false),
+            (TOKEN_OWNER_ACCOUNT_B, true, false),
+            (TOKEN_VAULT_A, true, false),
+            (TOKEN_VAULT_B, true, false),
+            (TICK_ARRAY_LOWER, true, false),
+            (TICK_ARRAY_UPPER, true, false),
+        ];
+
         let (_, m) = build(1, 1, 1);
-        // whirlpool: writable
-        assert!(m[0].is_writable && !m[0].is_signer);
-        // token_program_a/b, memo: readonly
-        for idx in [1, 2, 3] {
-            assert!(!m[idx].is_writable && !m[idx].is_signer);
-        }
-        // position_authority (vault): readonly + signer (signs via seeds)
-        assert!(!m[4].is_writable && m[4].is_signer);
-        // position: writable
-        assert!(m[5].is_writable && !m[5].is_signer);
-        // position_token_account: readonly
-        assert!(!m[6].is_writable && !m[6].is_signer);
-        // token_mint_a/b: readonly
-        assert!(!m[7].is_writable && !m[8].is_writable);
-        // owner accounts + pool vaults + tick arrays: writable
-        for idx in [9, 10, 11, 12, 13, 14] {
-            assert!(
-                m[idx].is_writable && !m[idx].is_signer,
-                "slot {idx} writable"
-            );
+        assert_eq!(m.len(), expected.len());
+        for (idx, (role, writable, signer)) in expected.iter().enumerate() {
+            assert_eq!(m[idx].pubkey, fixed(*role), "pubkey at slot {idx}");
+            assert_eq!(m[idx].is_writable, *writable, "is_writable at slot {idx}");
+            assert_eq!(m[idx].is_signer, *signer, "is_signer at slot {idx}");
         }
     }
 }

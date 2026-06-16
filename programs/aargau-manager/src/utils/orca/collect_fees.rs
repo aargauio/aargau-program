@@ -11,19 +11,19 @@
 //!
 //! | idx | account              | flags             |
 //! |----:|----------------------|-------------------|
-//! |  0  | whirlpool            | writable          |
-//! |  1  | token_program_a      | readonly          |
-//! |  2  | token_program_b      | readonly          |
-//! |  3  | memo_program         | readonly          |
-//! |  4  | position_authority   | readonly + signer | ← vault PDA
-//! |  5  | position             | writable          |
-//! |  6  | position_token_account | readonly        | ← vault NFT ATA (amount==1)
-//! |  7  | token_mint_a         | readonly          |
-//! |  8  | token_mint_b         | readonly          |
-//! |  9  | token_owner_account_a| writable          | ← vault ATA A
-//! | 10  | token_owner_account_b| writable          | ← vault ATA B
-//! | 11  | token_vault_a        | writable          | ← pool vault A
-//! | 12  | token_vault_b        | writable          | ← pool vault B
+//! |  0  | whirlpool            | readonly          |
+//! |  1  | position_authority   | readonly + signer | ← vault PDA
+//! |  2  | position             | writable          |
+//! |  3  | position_token_account | readonly        | ← vault NFT ATA (amount==1)
+//! |  4  | token_mint_a         | readonly          |
+//! |  5  | token_mint_b         | readonly          |
+//! |  6  | token_owner_account_a| writable          | ← vault ATA A
+//! |  7  | token_vault_a        | writable          | ← pool vault A
+//! |  8  | token_owner_account_b| writable          | ← vault ATA B
+//! |  9  | token_vault_b        | writable          | ← pool vault B
+//! | 10  | token_program_a      | readonly          |
+//! | 11  | token_program_b      | readonly          |
+//! | 12  | memo_program         | readonly          |
 //! | ... | transfer-hook remaining accounts (none for transfer-fee-only mints) |
 //!
 //! Args (Borsh): `remaining_accounts_info: Option<RemainingAccountsInfo>` → `None` (0u8).
@@ -32,7 +32,7 @@
 //!
 //! | idx | account              | flags             |
 //! |----:|----------------------|-------------------|
-//! |  0  | whirlpool            | writable          |
+//! |  0  | whirlpool            | readonly          |
 //! |  1  | position_authority   | readonly + signer | ← vault PDA
 //! |  2  | position             | writable          |
 //! |  3  | position_token_account | readonly        | ← vault NFT ATA (amount==1)
@@ -99,20 +99,25 @@ pub fn build_collect_fees_v2_instruction_data(
     data.extend_from_slice(&ORCA_COLLECT_FEES_V2_DISCRIMINATOR);
     data.push(0u8); // remaining_accounts_info = None
 
+    // Order taken verbatim from CollectFeesV2 `#[derive(Accounts)]`
+    // (orca-so/whirlpools programs/whirlpool/src/instructions/v2/collect_fees.rs):
+    // whirlpool is readonly (Box<Account>, no `mut`); token programs + memo come
+    // LAST, not first (that front placement is the ModifyLiquidityV2 layout). The
+    // A-pair (owner, vault) and B-pair (owner, vault) are interleaved, not grouped.
     let metas = vec![
-        AccountMeta::new(*whirlpool, false),
-        AccountMeta::new_readonly(*token_program_a, false),
-        AccountMeta::new_readonly(*token_program_b, false),
-        AccountMeta::new_readonly(*memo_program, false),
+        AccountMeta::new_readonly(*whirlpool, false),
         AccountMeta::new_readonly(*position_authority, true),
         AccountMeta::new(*position, false),
         AccountMeta::new_readonly(*position_token_account, false),
         AccountMeta::new_readonly(*token_mint_a, false),
         AccountMeta::new_readonly(*token_mint_b, false),
         AccountMeta::new(*token_owner_account_a, false),
-        AccountMeta::new(*token_owner_account_b, false),
         AccountMeta::new(*token_vault_a, false),
+        AccountMeta::new(*token_owner_account_b, false),
         AccountMeta::new(*token_vault_b, false),
+        AccountMeta::new_readonly(*token_program_a, false),
+        AccountMeta::new_readonly(*token_program_b, false),
+        AccountMeta::new_readonly(*memo_program, false),
     ];
 
     (data, metas)
@@ -146,20 +151,21 @@ pub fn invoke_collect_fees_v2(
         data,
     };
 
+    // Must mirror build_collect_fees_v2_instruction_data meta order exactly.
     let infos = [
         cpi.whirlpool.clone(),
-        cpi.token_program_a.clone(),
-        cpi.token_program_b.clone(),
-        cpi.memo_program.clone(),
         cpi.vault.clone(),
         cpi.position.clone(),
         cpi.position_token_account.clone(),
         cpi.token_mint_a.clone(),
         cpi.token_mint_b.clone(),
         cpi.vault_token_a.clone(),
-        cpi.vault_token_b.clone(),
         cpi.token_vault_a.clone(),
+        cpi.vault_token_b.clone(),
         cpi.token_vault_b.clone(),
+        cpi.token_program_a.clone(),
+        cpi.token_program_b.clone(),
+        cpi.memo_program.clone(),
     ];
 
     invoke_signed(&ix, &infos, &[vault_signer_seeds]).map_err(Into::into)
@@ -203,8 +209,11 @@ pub fn build_collect_reward_v2_instruction_data(
     data.push(reward_index);
     data.push(0u8); // remaining_accounts_info = None
 
+    // Order from CollectRewardV2 `#[derive(Accounts)]`
+    // (orca-so/whirlpools programs/whirlpool/src/instructions/v2/collect_reward.rs):
+    // whirlpool is readonly (Box<Account>, no `mut`).
     let metas = vec![
-        AccountMeta::new(*whirlpool, false),
+        AccountMeta::new_readonly(*whirlpool, false),
         AccountMeta::new_readonly(*position_authority, true),
         AccountMeta::new(*position, false),
         AccountMeta::new_readonly(*position_token_account, false),
