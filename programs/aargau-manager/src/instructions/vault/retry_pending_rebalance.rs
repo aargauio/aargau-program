@@ -23,21 +23,19 @@ use crate::{
     errors::AargauError,
     events::RebalanceExecuted,
     state::{Protocol, ProtocolConfig, TriggeredBy, VaultAccount},
-    utils::{
-        orca::{
-            accounts::{
-                derive_position_pda, derive_tick_array_pda, is_token_2022,
-                require_v2_transferable_mint, tick_array_start_index,
-            },
-            increase_liquidity::{invoke_increase_liquidity_v2, IncreaseLiquidityV2Cpi},
-            open_position::{
-                invoke_open_position_with_token_extensions, OpenPositionWithTokenExtensionsCpi,
-            },
-            whirlpool_view::{
-                parse_whirlpool_view_from_bytes, require_whirlpool_bindings, WhirlpoolView,
-            },
+    utils::orca::{
+        accounts::{
+            derive_position_pda, is_token_2022, read_transfer_fee_config,
+            require_v2_transferable_mint,
         },
-        signer_seeds::vault_signer_seeds,
+        increase_liquidity::{invoke_increase_liquidity_v2, IncreaseLiquidityV2Cpi},
+        open_position::{
+            invoke_open_position_with_token_extensions, OpenPositionWithTokenExtensionsCpi,
+        },
+        rebalance_helpers::{require_tick_array, VaultSignerSeedBytes},
+        whirlpool_view::{
+            parse_whirlpool_view_from_bytes, require_whirlpool_bindings, WhirlpoolView,
+        },
     },
 };
 use anchor_lang::prelude::*;
@@ -303,7 +301,15 @@ fn open_new_position(
         associated_token_program: ctx.accounts.associated_token_program.to_account_info(),
         metadata_update_auth: ctx.accounts.metadata_update_auth.to_account_info(),
     };
-    invoke_open_position_with_token_extensions(&cpi, tick_lower, tick_upper, &seeds)
+    invoke_open_position_with_token_extensions(&cpi, tick_lower, tick_upper, &seeds)?;
+
+    // Re-snapshot the per-mint Token-2022 transfer-fee config from the live
+    // mints. A Token-2022 mint can update its transfer-fee config between
+    // epochs, so the snapshot taken at the original open (Tx1's source position)
+    // can be stale by the time this Tx2 runs. Refresh before `increase_liquidity`
+    // so the fee path accounts for the current deductions — mirrors the Slice-1
+    // open leg in `execute_action_orca::handle_open_position`.
+    snapshot_transfer_fees(ctx)
 }
 
 fn increase_new_liquidity<'info>(
@@ -354,27 +360,6 @@ fn increase_new_liquidity<'info>(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Owned byte buffers backing the vault PDA signer seeds.
-struct VaultSignerSeedBytes {
-    user: [u8; 32],
-    pool: [u8; 32],
-    bump: [u8; 1],
-}
-
-impl VaultSignerSeedBytes {
-    fn new(vault: &VaultAccount) -> Self {
-        Self {
-            user: vault.user_authority.to_bytes(),
-            pool: vault.pool_address.to_bytes(),
-            bump: [vault.bump],
-        }
-    }
-
-    fn seeds(&self) -> [&[u8]; 4] {
-        vault_signer_seeds(&self.user, &self.pool, &self.bump)
-    }
-}
-
 fn require_pair_mints_v2_transferable(ctx: &Context<RetryPendingRebalance>) -> Result<()> {
     for mint in [&ctx.accounts.mint_a, &ctx.accounts.mint_b] {
         let info = mint.to_account_info();
@@ -386,20 +371,37 @@ fn require_pair_mints_v2_transferable(ctx: &Context<RetryPendingRebalance>) -> R
     Ok(())
 }
 
+/// Snapshot the Token-2022 transfer-fee config for both pair mints onto the
+/// vault, refreshed from the live mints at the moment of the new open. A
+/// Token-2022 mint can update its transfer-fee config between epochs, so the
+/// snapshot must be re-read here rather than inherited from the original open.
+/// `uses_token_2022` is set when either mint is Token-2022; SPL classic mints
+/// (or Token-2022 without the extension) leave the fields at zero. Mirrors
+/// `execute_action_orca::snapshot_transfer_fees`.
+fn snapshot_transfer_fees(ctx: &mut Context<RetryPendingRebalance>) -> Result<()> {
+    let mint_a_is_2022 = is_token_2022(ctx.accounts.mint_a.to_account_info().owner);
+    let mint_b_is_2022 = is_token_2022(ctx.accounts.mint_b.to_account_info().owner);
+
+    let (a_bps, a_max) = read_fee(&ctx.accounts.mint_a.to_account_info())?;
+    let (b_bps, b_max) = read_fee(&ctx.accounts.mint_b.to_account_info())?;
+
+    let vault = &mut ctx.accounts.vault;
+    vault.uses_token_2022 = mint_a_is_2022 || mint_b_is_2022;
+    vault.token_a_transfer_fee_bps = a_bps;
+    vault.token_a_maximum_fee = a_max;
+    vault.token_b_transfer_fee_bps = b_bps;
+    vault.token_b_maximum_fee = b_max;
+    Ok(())
+}
+
+fn read_fee(mint: &AccountInfo<'_>) -> Result<(u16, u64)> {
+    let data = mint.try_borrow_data()?;
+    Ok(read_transfer_fee_config(&data)
+        .map(|c| (c.transfer_fee_bps, c.maximum_fee))
+        .unwrap_or((0, 0)))
+}
+
 fn parse_whirlpool_view(whirlpool: &UncheckedAccount<'_>) -> Result<WhirlpoolView> {
     let data = whirlpool.try_borrow_data()?;
     parse_whirlpool_view_from_bytes(&data)
-}
-
-/// Bind a passed tick-array account to the PDA covering `tick`.
-fn require_tick_array(
-    whirlpool: &Pubkey,
-    tick: i32,
-    tick_spacing: u16,
-    passed: &Pubkey,
-) -> Result<()> {
-    let start = tick_array_start_index(tick, tick_spacing)?;
-    let expected = derive_tick_array_pda(whirlpool, start);
-    require_keys_eq!(*passed, expected, AargauError::InvalidPool);
-    Ok(())
 }

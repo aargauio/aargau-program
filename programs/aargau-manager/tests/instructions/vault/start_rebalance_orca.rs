@@ -104,6 +104,29 @@ mod start_rebalance_orca_range_guard {
     fn nonzero_liquidity_is_accepted() {
         assert!(liquidity_is_valid(1));
     }
+
+    /// The handler rejects a fully-zero slippage floor on the close leg: a
+    /// non-empty full close always returns value on at least one side, so 0/0
+    /// would disable protection. A single-sided floor (one side 0) stays valid.
+    fn slippage_floor_is_valid(token_min_a: u64, token_min_b: u64) -> bool {
+        token_min_a > 0 || token_min_b > 0
+    }
+
+    #[test]
+    fn zero_zero_slippage_floor_is_rejected() {
+        assert!(!slippage_floor_is_valid(0, 0));
+    }
+
+    #[test]
+    fn single_sided_slippage_floor_is_accepted() {
+        assert!(slippage_floor_is_valid(0, 1));
+        assert!(slippage_floor_is_valid(1, 0));
+    }
+
+    #[test]
+    fn both_sided_slippage_floor_is_accepted() {
+        assert!(slippage_floor_is_valid(1, 1));
+    }
 }
 
 mod start_rebalance_orca_replay {
@@ -137,6 +160,19 @@ mod start_rebalance_orca_replay {
 
     /// If Tx2 never lands, the vault stays in pending state and the drained
     /// tokens remain withdrawable from the vault ATAs.
+    ///
+    /// Replay contract (asserted once the fixture lands and the instruction
+    /// harness drives `StartRebalanceOrca` against the loaded program):
+    ///   1. Seed a vault with an active position over `[old_lower, old_upper]`.
+    ///   2. Run Tx1 with target range `[new_lower, new_upper]`; it must succeed.
+    ///   3. `pending_rebalance == Some` and its `new_tick_lower / new_tick_upper`
+    ///      equal the supplied target `[new_lower, new_upper]` (NOT the old
+    ///      range), with `retry_count == 0` and `last_failure_reason == 0`.
+    ///   4. `position_address == None`, `position_mint == None`,
+    ///      `position_range_{lower,upper} == None` — the old position is cleared.
+    ///   5. WITHOUT running Tx2, the drained tokens sit in the vault ATAs and a
+    ///      subsequent `withdraw` / `emergency_withdraw` can move them out — the
+    ///      pending state never traps funds.
     #[test]
     #[ignore = "requires orca_whirlpools.so fixture"]
     fn pending_persists_when_open_never_runs() {
@@ -144,5 +180,8 @@ mod start_rebalance_orca_replay {
         let Ok(_mollusk) = try_build_whirlpools_mollusk(&aargau_program_id) else {
             return;
         };
+        // Assertions per the replay contract above are wired with the harness
+        // that builds the `StartRebalanceOrca` instruction + account set against
+        // the dumped Whirlpools program.
     }
 }

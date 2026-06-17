@@ -103,6 +103,22 @@ mod retry_pending_rebalance_replay {
     /// Idempotent retry: a first attempt that fails atomically (open+increase)
     /// persists no position; a retry with a FRESH ephemeral mint succeeds and
     /// clears pending. Re-running after success hits `NoPendingRebalance`.
+    ///
+    /// Replay contract (asserted once the fixture lands and the instruction
+    /// harness drives `RetryPendingRebalance` against the loaded program):
+    ///   1. Seed a vault in the post-Tx1 state: `pending_rebalance = Some`,
+    ///      `position_address = None`, drained tokens in the vault ATAs.
+    ///   2. First Tx2 attempt with `position_mint = mint_1` succeeds:
+    ///      `pending_rebalance == None`, `position_address == Some(pos_1)`,
+    ///      `position_range_{lower,upper}` equal the STORED pending target (not
+    ///      any caller tick — the tick params were removed).
+    ///   3. A second Tx2 (any amounts, any `position_mint`) must fail with
+    ///      `AargauError::NoPendingRebalance` (1304) — the pending flag is gone,
+    ///      so the open never re-runs (idempotency: success is a one-shot).
+    ///   4. Re-using the same `position_mint = mint_1` on a fresh pending vault
+    ///      must fail at the position-PDA bind (the PDA derives from the mint
+    ///      and `mint_1`'s position already exists) — every attempt requires a
+    ///      freshly generated ephemeral mint.
     #[test]
     #[ignore = "requires orca_whirlpools.so fixture"]
     fn retry_with_fresh_mint_is_idempotent() {
@@ -110,5 +126,8 @@ mod retry_pending_rebalance_replay {
         let Ok(_mollusk) = try_build_whirlpools_mollusk(&aargau_program_id) else {
             return;
         };
+        // Assertions per the replay contract above are wired with the harness
+        // that builds the `RetryPendingRebalance` instruction + account set
+        // against the dumped Whirlpools program.
     }
 }

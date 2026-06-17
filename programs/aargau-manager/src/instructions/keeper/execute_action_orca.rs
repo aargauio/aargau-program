@@ -38,9 +38,9 @@ use crate::{
         fee::calc_aargau_fee,
         orca::{
             accounts::{
-                derive_position_pda, derive_tick_array_pda, is_token_2022,
-                read_transfer_fee_config, require_orca_position, require_reward_owner_is_vault_ata,
-                require_v2_transferable_mint, tick_array_start_index,
+                derive_position_pda, is_token_2022, read_transfer_fee_config,
+                require_orca_position, require_reward_owner_is_vault_ata,
+                require_v2_transferable_mint,
             },
             close_position::{
                 invoke_close_position_with_token_extensions, ClosePositionWithTokenExtensionsCpi,
@@ -54,17 +54,19 @@ use crate::{
             open_position::{
                 invoke_open_position_with_token_extensions, OpenPositionWithTokenExtensionsCpi,
             },
+            rebalance_helpers::{
+                require_tick_array, transfer_performance_fee, VaultSignerSeedBytes,
+            },
             whirlpool_view::{
                 parse_whirlpool_view_from_bytes, require_whirlpool_bindings, WhirlpoolView,
             },
         },
-        signer_seeds::vault_signer_seeds,
     },
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked},
+    token_interface::{Mint, TokenAccount, TokenInterface},
 };
 
 /// Number of accounts the caller appends to `remaining_accounts` per active
@@ -740,28 +742,6 @@ fn collect_rewards<'info>(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Owned byte buffers backing the vault PDA signer seeds. The seed slices
-/// borrow from these buffers, so the struct must outlive the CPI.
-struct VaultSignerSeedBytes {
-    user: [u8; 32],
-    pool: [u8; 32],
-    bump: [u8; 1],
-}
-
-impl VaultSignerSeedBytes {
-    fn new(vault: &VaultAccount) -> Self {
-        Self {
-            user: vault.user_authority.to_bytes(),
-            pool: vault.pool_address.to_bytes(),
-            bump: [vault.bump],
-        }
-    }
-
-    fn seeds(&self) -> [&[u8]; 4] {
-        vault_signer_seeds(&self.user, &self.pool, &self.bump)
-    }
-}
-
 /// Assemble the shared ModifyLiquidityV2 CPI struct (increase + decrease).
 fn modify_liquidity_cpi<'info>(
     ctx: &Context<'info, ExecuteActionOrca<'info>>,
@@ -784,38 +764,6 @@ fn modify_liquidity_cpi<'info>(
         tick_array_lower: ctx.accounts.tick_array_lower.to_account_info(),
         tick_array_upper: ctx.accounts.tick_array_upper.to_account_info(),
     }
-}
-
-/// Transfer `amount` of `mint` from the vault ATA to the treasury ATA, signed
-/// by the vault PDA. No-op when `amount == 0`.
-#[allow(clippy::too_many_arguments)]
-fn transfer_performance_fee<'info>(
-    token_program_key: Pubkey,
-    from_vault_ata: AccountInfo<'info>,
-    mint: AccountInfo<'info>,
-    to_treasury_ata: AccountInfo<'info>,
-    vault_authority: AccountInfo<'info>,
-    decimals: u8,
-    amount: u64,
-    signer: &[&[&[u8]]],
-) -> Result<()> {
-    if amount == 0 {
-        return Ok(());
-    }
-    token_interface::transfer_checked(
-        CpiContext::new_with_signer(
-            token_program_key,
-            TransferChecked {
-                from: from_vault_ata,
-                mint,
-                to: to_treasury_ata,
-                authority: vault_authority,
-            },
-            signer,
-        ),
-        amount,
-        decimals,
-    )
 }
 
 /// Snapshot the Token-2022 transfer-fee config for both pair mints onto the
@@ -900,17 +848,4 @@ fn require_tick_arrays_bound(ctx: &Context<ExecuteActionOrca>, view: &WhirlpoolV
         view.tick_spacing,
         &ctx.accounts.tick_array_upper.key(),
     )
-}
-
-/// Bind a passed tick-array account to the PDA covering `tick`.
-fn require_tick_array(
-    whirlpool: &Pubkey,
-    tick: i32,
-    tick_spacing: u16,
-    passed: &Pubkey,
-) -> Result<()> {
-    let start = tick_array_start_index(tick, tick_spacing)?;
-    let expected = derive_tick_array_pda(whirlpool, start);
-    require_keys_eq!(*passed, expected, AargauError::InvalidPool);
-    Ok(())
 }

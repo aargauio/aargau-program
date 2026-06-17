@@ -39,9 +39,8 @@ use crate::{
         fee::calc_aargau_fee,
         orca::{
             accounts::{
-                derive_tick_array_pda, is_token_2022, require_orca_position,
-                require_reward_owner_is_vault_ata, require_v2_transferable_mint,
-                tick_array_start_index,
+                is_token_2022, require_orca_position, require_reward_owner_is_vault_ata,
+                require_v2_transferable_mint,
             },
             close_position::{
                 invoke_close_position_with_token_extensions, ClosePositionWithTokenExtensionsCpi,
@@ -51,15 +50,17 @@ use crate::{
                 CollectRewardV2Cpi,
             },
             decrease_liquidity::{invoke_decrease_liquidity_v2, DecreaseLiquidityV2Cpi},
+            rebalance_helpers::{
+                require_tick_array, transfer_performance_fee, VaultSignerSeedBytes,
+            },
             whirlpool_view::{
                 parse_whirlpool_view_from_bytes, require_whirlpool_bindings, WhirlpoolView,
             },
         },
-        signer_seeds::vault_signer_seeds,
     },
 };
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 /// Number of accounts appended to `remaining_accounts` per active reward slot
 /// (reward_owner ATA, reward_mint, reward_vault, reward_token_program).
@@ -72,8 +73,21 @@ pub struct StartRebalanceOrcaParams {
     pub new_tick_lower: i32,
     /// Target upper tick of the new range.
     pub new_tick_upper: i32,
-    /// Full current position liquidity to remove. The Orca `Position` layout is
-    /// not parsed on-chain; the caller supplies the value off-chain.
+    /// Full current position liquidity to remove.
+    ///
+    /// LOAD-BEARING OFF-CHAIN CONTRACT: this MUST equal the position's *entire*
+    /// current `liquidity`. The Orca `Position` layout is deliberately not
+    /// parsed on-chain (no `Position` deserialize — keeps the close leg cheap
+    /// and the account set minimal), so the program cannot verify the value is
+    /// the full amount. The builder reads `Position.liquidity` off-chain and
+    /// passes it verbatim.
+    ///
+    /// If the caller under-states this, `decrease_liquidity_v2` removes only
+    /// part of the position and the subsequent `close_position` CPI reverts —
+    /// Orca requires an empty position to close — surfacing as an opaque
+    /// Whirlpools error rather than a typed `AargauError`. The whole
+    /// transaction rolls back atomically (no partial state persists), so a
+    /// retry with the correct full liquidity is safe.
     pub decrease_liquidity_amount: u128,
     /// Slippage floor for token A returned by the decrease.
     pub token_min_a: u64,
@@ -223,6 +237,15 @@ pub fn handler<'info>(
         params.decrease_liquidity_amount > 0,
         AargauError::InvalidActionPayload
     );
+    // Reject a fully-zero slippage floor: a non-empty full close always returns
+    // value on at least one side (token A below range, token B above range, both
+    // in range), so a 0/0 floor would silently disable slippage protection on
+    // the close leg. A legitimate single-sided floor (one side 0) is still
+    // allowed.
+    require!(
+        params.token_min_a > 0 || params.token_min_b > 0,
+        AargauError::SlippageExceeded
+    );
 
     // The position must exist and match what the vault recorded on open.
     require_active_position(&ctx.accounts.vault, &ctx.accounts.position)?;
@@ -252,7 +275,12 @@ pub fn handler<'info>(
         params.token_min_b,
     )?;
 
-    // 3. Burn the now-empty position NFT (rent → user).
+    // 3. Burn the position NFT (rent → user). This CPI requires the position to
+    //    be empty: if `decrease_liquidity_amount` under-stated the true full
+    //    liquidity, residual liquidity remains and Orca's close reverts here
+    //    (opaque Whirlpools error). The whole transaction rolls back — no
+    //    partial state persists — so a retry with the correct full liquidity is
+    //    safe. See `StartRebalanceOrcaParams::decrease_liquidity_amount`.
     close_old_position(&mut ctx)?;
 
     // 4. Record the pending state and clear the old position fields.
@@ -571,59 +599,6 @@ fn collect_rewards<'info>(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Owned byte buffers backing the vault PDA signer seeds.
-struct VaultSignerSeedBytes {
-    user: [u8; 32],
-    pool: [u8; 32],
-    bump: [u8; 1],
-}
-
-impl VaultSignerSeedBytes {
-    fn new(vault: &VaultAccount) -> Self {
-        Self {
-            user: vault.user_authority.to_bytes(),
-            pool: vault.pool_address.to_bytes(),
-            bump: [vault.bump],
-        }
-    }
-
-    fn seeds(&self) -> [&[u8]; 4] {
-        vault_signer_seeds(&self.user, &self.pool, &self.bump)
-    }
-}
-
-/// Transfer `amount` of `mint` from the vault ATA to the treasury ATA, signed
-/// by the vault PDA. No-op when `amount == 0`.
-#[allow(clippy::too_many_arguments)]
-fn transfer_performance_fee<'info>(
-    token_program_key: Pubkey,
-    from_vault_ata: AccountInfo<'info>,
-    mint: AccountInfo<'info>,
-    to_treasury_ata: AccountInfo<'info>,
-    vault_authority: AccountInfo<'info>,
-    decimals: u8,
-    amount: u64,
-    signer: &[&[&[u8]]],
-) -> Result<()> {
-    if amount == 0 {
-        return Ok(());
-    }
-    token_interface::transfer_checked(
-        CpiContext::new_with_signer(
-            token_program_key,
-            TransferChecked {
-                from: from_vault_ata,
-                mint,
-                to: to_treasury_ata,
-                authority: vault_authority,
-            },
-            signer,
-        ),
-        amount,
-        decimals,
-    )
-}
-
 /// Parse the on-chain `Whirlpool` view (validates discriminator as
 /// defence-in-depth on top of the owner constraint).
 fn parse_whirlpool_view(whirlpool: &UncheckedAccount<'_>) -> Result<WhirlpoolView> {
@@ -669,17 +644,4 @@ fn require_tick_arrays_bound(
         view.tick_spacing,
         &ctx.accounts.tick_array_upper.key(),
     )
-}
-
-/// Bind a passed tick-array account to the PDA covering `tick`.
-fn require_tick_array(
-    whirlpool: &Pubkey,
-    tick: i32,
-    tick_spacing: u16,
-    passed: &Pubkey,
-) -> Result<()> {
-    let start = tick_array_start_index(tick, tick_spacing)?;
-    let expected = derive_tick_array_pda(whirlpool, start);
-    require_keys_eq!(*passed, expected, AargauError::InvalidPool);
-    Ok(())
 }

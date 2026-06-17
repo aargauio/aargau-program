@@ -28,6 +28,7 @@ pub mod collect_fees;
 pub mod decrease_liquidity;
 pub mod increase_liquidity;
 pub mod open_position;
+pub mod rebalance_helpers;
 pub mod whirlpool_view;
 
 pub use accounts::*;
@@ -36,4 +37,5 @@ pub use collect_fees::*;
 pub use decrease_liquidity::*;
 pub use increase_liquidity::*;
 pub use open_position::*;
+pub use rebalance_helpers::*;
 pub use whirlpool_view::*;
