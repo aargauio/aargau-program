@@ -23,6 +23,10 @@ pub const METEORA_DLMM_PROGRAM_ID: Pubkey = pubkey!("LBUZKhRxPF3XUpBCjp4YzTKgLcc
 /// Orca Whirlpool account discriminator
 pub const ORCA_WHIRLPOOL_DISCRIMINATOR: [u8; 8] = [63, 149, 209, 12, 225, 128, 99, 9];
 
+/// Orca `Position` account discriminator: `sha256("account:Position")[..8]`.
+/// Used to certify the account type of the position before any liquidity CPI.
+pub const ORCA_POSITION_DISCRIMINATOR: [u8; 8] = [170, 188, 143, 228, 122, 64, 247, 208];
+
 /// Raydium PoolState account discriminator
 pub const RAYDIUM_POOL_STATE_DISCRIMINATOR: [u8; 8] = [247, 237, 227, 245, 215, 195, 222, 70];
 
@@ -91,6 +95,71 @@ pub const METEORA_REBALANCE_LIQUIDITY_DISCRIMINATOR: [u8; 8] = [92, 4, 176, 193,
 /// Derived: `sha256("account:PositionV2")[..8]`. Used by callers to
 /// pre-validate `vault.position_address` before any CPI fires.
 pub const METEORA_POSITION_V2_DISCRIMINATOR: [u8; 8] = [117, 176, 212, 199, 245, 180, 133, 182];
+
+// ---------------------------------------------------------------------------
+// Orca Whirlpools instruction discriminators (Anchor 8-byte: sha256("global:<name>")[0..8])
+//
+// All bytes below were re-derived via `sha256("global:<name>")[..8]` and the
+// v1 / token-extension variants cross-checked byte-for-byte against the
+// on-chain-verified values in the backend Orca tx builders. The `_v2`
+// variants (collect_fees_v2 / collect_reward_v2) are derived here.
+// ---------------------------------------------------------------------------
+
+/// `open_position_with_token_extensions(tick_lower_index: i32, tick_upper_index: i32,
+///                                      with_token_metadata_extension: bool)`.
+/// Mints a Token-2022 position NFT (decimals 0, supply 1) into an ATA owned
+/// by the vault PDA; no Metaplex metadata account is created.
+pub const ORCA_OPEN_POSITION_WITH_TOKEN_EXTENSIONS_DISCRIMINATOR: [u8; 8] =
+    [212, 47, 95, 92, 114, 102, 131, 250];
+
+/// `increase_liquidity_v2(liquidity_amount: u128, token_max_a: u64, token_max_b: u64,
+///                        remaining_accounts_info: Option<RemainingAccountsInfo>)`.
+pub const ORCA_INCREASE_LIQUIDITY_V2_DISCRIMINATOR: [u8; 8] = [133, 29, 89, 223, 69, 238, 176, 10];
+
+/// `decrease_liquidity_v2(liquidity_amount: u128, token_min_a: u64, token_min_b: u64,
+///                        remaining_accounts_info: Option<RemainingAccountsInfo>)`.
+pub const ORCA_DECREASE_LIQUIDITY_V2_DISCRIMINATOR: [u8; 8] = [58, 127, 188, 62, 79, 82, 196, 96];
+
+/// `collect_fees_v2(remaining_accounts_info: Option<RemainingAccountsInfo>)`.
+pub const ORCA_COLLECT_FEES_V2_DISCRIMINATOR: [u8; 8] = [207, 117, 95, 191, 229, 180, 226, 15];
+
+/// `collect_reward_v2(reward_index: u8, remaining_accounts_info: Option<RemainingAccountsInfo>)`.
+pub const ORCA_COLLECT_REWARD_V2_DISCRIMINATOR: [u8; 8] = [177, 107, 37, 180, 160, 19, 49, 209];
+
+/// `close_position_with_token_extensions()` — burns the Token-2022 NFT,
+/// closes the mint, refunds rent. Requires the position to be fully empty.
+pub const ORCA_CLOSE_POSITION_WITH_TOKEN_EXTENSIONS_DISCRIMINATOR: [u8; 8] =
+    [1, 182, 135, 59, 155, 25, 99, 223];
+
+// ---------------------------------------------------------------------------
+// Orca Whirlpools layout / CLMM constants
+// ---------------------------------------------------------------------------
+
+/// Number of ticks packed inside a single Orca `TickArray` account.
+pub const TICK_ARRAY_SIZE: i32 = 88;
+
+/// Max reward slots an Orca position can carry (`collect_reward_v2` runs once
+/// per active index). Inactive reward vaults equal `Pubkey::default()`.
+pub const ORCA_REWARD_SLOTS: usize = 3;
+
+/// Token-2022 program — owns the position NFT mint + its ATA, and may own
+/// either pair mint in a mixed pool. Per-mint detection picks the right
+/// token program for each `_v2` CPI.
+pub const TOKEN_2022_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+/// Orca position-NFT metadata update authority — account #9 of
+/// `open_position_with_token_extensions`. The Whirlpools program pins this
+/// key itself; we forward it.
+pub const ORCA_METADATA_UPDATE_AUTH: Pubkey =
+    pubkey!("3axbTs2z5GBy6usVbNVoqEgZMng3vZvMnAoX29BFfwhr");
+
+/// PDA seed prefix for an Orca `Position` account (`[b"position", position_mint]`).
+pub const ORCA_POSITION_SEED: &[u8] = b"position";
+
+/// PDA seed prefix for an Orca `TickArray` account
+/// (`[b"tick_array", whirlpool, start_tick_index.to_string()]` — third seed is
+/// the ASCII decimal string of the start index, not its LE bytes).
+pub const ORCA_TICK_ARRAY_SEED: &[u8] = b"tick_array";
 
 // ---------------------------------------------------------------------------
 // Meteora bin layout / DLMM constants

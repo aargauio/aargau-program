@@ -28,12 +28,13 @@ dist/
 .env.local
 .env.*.local
 
-# Internal agent instructions
-CLAUDE.md
-
 # Editor
 .vscode/
 .idea/
 *.swp
 *.swo
 .DS_Store
+
+# Internal agent instructions (never expose in public repo)
+AGENTS.md
+CLAUDE.md

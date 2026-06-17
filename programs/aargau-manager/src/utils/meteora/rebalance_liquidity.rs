@@ -174,6 +174,15 @@ pub fn build_rebalance_liquidity_instruction_data(args: &RebalanceLiquidityArgs)
 /// Pure constructor for the raw `rebalance_liquidity` account metas in the
 /// vault-mode layout documented at the top of this module. Exposed for the
 /// same reason as the data builder.
+///
+/// The four BinArray slots (lower_old, upper_old, lower_new, upper_new) are
+/// deduplicated before being appended. When the new range partially overlaps
+/// the old one the caller passes the same PDA in multiple slots. Solana's
+/// runtime rejects a CPI instruction where the same writable account key
+/// appears more than once in the `accounts` list (`DuplicateAccountOutOfSync`).
+/// Deduplication preserves slot-order priority: lower_old is always first,
+/// then upper_old (if distinct), then lower_new and upper_new (each only if
+/// not already present).
 #[allow(clippy::too_many_arguments)]
 pub fn build_rebalance_liquidity_account_metas(
     position: &Pubkey,
@@ -196,7 +205,7 @@ pub fn build_rebalance_liquidity_account_metas(
     bin_array_lower_new: &Pubkey,
     bin_array_upper_new: &Pubkey,
 ) -> Vec<AccountMeta> {
-    vec![
+    let mut metas = vec![
         AccountMeta::new(*position, false),
         AccountMeta::new(*lb_pair, false),
         AccountMeta::new_readonly(*bin_array_bitmap_extension, false),
@@ -212,11 +221,24 @@ pub fn build_rebalance_liquidity_account_metas(
         AccountMeta::new_readonly(*memo_program, false),
         AccountMeta::new_readonly(*event_authority, false),
         AccountMeta::new_readonly(*dlmm_program, false),
-        AccountMeta::new(*bin_array_lower_old, false),
-        AccountMeta::new(*bin_array_upper_old, false),
-        AccountMeta::new(*bin_array_lower_new, false),
-        AccountMeta::new(*bin_array_upper_new, false),
-    ]
+    ];
+
+    // Dedup the four BinArray slots. Each unique PDA is pushed once in
+    // slot-priority order: lower_old → upper_old → lower_new → upper_new.
+    let mut seen: Vec<Pubkey> = Vec::with_capacity(4);
+    for key in [
+        bin_array_lower_old,
+        bin_array_upper_old,
+        bin_array_lower_new,
+        bin_array_upper_new,
+    ] {
+        if !seen.contains(key) {
+            seen.push(*key);
+            metas.push(AccountMeta::new(*key, false));
+        }
+    }
+
+    metas
 }
 
 /// Build & invoke `rebalance_liquidity`. `vault_signer_seeds` is the vault
@@ -280,7 +302,7 @@ pub fn invoke_rebalance_liquidity(
         data,
     };
 
-    let infos = [
+    let mut infos = vec![
         cpi.position.clone(),
         cpi.lb_pair.clone(),
         cpi.bin_array_bitmap_extension.clone(),
@@ -296,11 +318,23 @@ pub fn invoke_rebalance_liquidity(
         cpi.memo_program.clone(),
         cpi.event_authority.clone(),
         cpi.dlmm_program.clone(),
-        cpi.bin_array_lower_old.clone(),
-        cpi.bin_array_upper_old.clone(),
-        cpi.bin_array_lower_new.clone(),
-        cpi.bin_array_upper_new.clone(),
     ];
+
+    // Mirror the same BinArray dedup applied in `build_rebalance_liquidity_account_metas`
+    // so the `account_infos` slice length and order match the `accounts` meta list exactly.
+    let ba_candidates = [
+        &cpi.bin_array_lower_old,
+        &cpi.bin_array_upper_old,
+        &cpi.bin_array_lower_new,
+        &cpi.bin_array_upper_new,
+    ];
+    let mut seen_ba: Vec<Pubkey> = Vec::with_capacity(4);
+    for ai in ba_candidates {
+        if !seen_ba.contains(&ai.key()) {
+            seen_ba.push(ai.key());
+            infos.push(ai.clone());
+        }
+    }
 
     invoke_signed(&ix, &infos, &[vault_signer_seeds]).map_err(Into::into)
 }

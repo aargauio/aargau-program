@@ -134,6 +134,22 @@ pub struct RewardsClaimed {
     pub timestamp: i64,
 }
 
+/// Emitted by `execute_action_orca::CollectFees` when an active reward slot is
+/// skipped because its mint carries a Token-2022 extension the v2 CPI cannot
+/// service with `remaining_accounts_info = None` (`TransferHook` /
+/// `NonTransferable`). Reward collection is best-effort: the slot is left
+/// uncollected in the Orca position (no funds lost — the vault still owns the
+/// position) so one incompatible reward mint can never revert the whole
+/// `CollectFees` transaction and block LP-fee collection. The skipped reward
+/// can be collected later off-chain or once hook support is wired.
+#[event]
+pub struct RewardCollectionSkipped {
+    pub vault: Pubkey,
+    pub reward_index: u8,
+    pub reward_mint: Pubkey,
+    pub timestamp: i64,
+}
+
 // --- Liquidity changes (single-sided ops outside a full rebalance) ---
 
 /// Direction of a liquidity change emitted by `execute_action`.

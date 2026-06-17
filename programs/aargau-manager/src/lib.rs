@@ -14,12 +14,24 @@
 //! - `withdraw` — proportional token withdrawal from idle vault
 //! - `emergency_withdraw` — unconditional full exit, bypasses is_paused
 //! - `set_protocol_pause` — admin kill switch
+//! - `execute_action` — keeper-style Meteora DLMM vault operations
+//!   (CollectFees, IncreaseLiquidity, DecreaseLiquidity, OpenPosition, ClosePosition)
+//! - `execute_action_orca` — Orca Whirlpools position lifecycle
+//!   (OpenPosition, IncreaseLiquidity, DecreaseLiquidity, CollectFees+rewards, ClosePosition);
+//!   Token-2022 position NFT + v2 token path
+//! - `manual_rebalance` — user-signed atomic Meteora DLMM rebalance
+//!   (claim_fee2 + rebalance_liquidity in one transaction)
+//! - `start_rebalance_orca` — phase one of the Orca two-transaction rebalance
+//!   (collect fees + drain + close old position; persist target range)
+//! - `retry_pending_rebalance` — phase two (open new Orca position over the
+//!   stored range + fund); idempotent, serves first attempt and every retry
+//! - `cancel_pending_rebalance` — clear a stuck pending rebalance (no pause
+//!   gate); tokens remain in the vault ATAs, withdrawable
 //!
 //! ## Stubs (correct signatures, reserved for future implementation):
-//! - `close_vault`, `claim_rewards`, `manual_rebalance`,
-//!   `cancel_pending_rebalance`, `retry_pending_rebalance`,
-//!   `update_protocol_config`, `withdraw_treasury`, `transfer_admin`,
-//!   `admin_emergency_transfer`, `execute_action`, `report_rebalance_attempt`
+//! - `close_vault`, `claim_rewards`, `update_protocol_config`,
+//!   `withdraw_treasury`, `transfer_admin`, `admin_emergency_transfer`,
+//!   `report_rebalance_attempt`
 
 use anchor_lang::prelude::*;
 
@@ -96,12 +108,26 @@ pub mod aargau_manager {
         manual_rebalance::handler(ctx, params)
     }
 
+    /// Phase one of the Orca two-transaction rebalance (CloseOld): collect
+    /// fees, drain the position, burn the NFT, and persist the target range in
+    /// `pending_rebalance`. Completed by `retry_pending_rebalance` (OpenNew).
+    pub fn start_rebalance_orca<'info>(
+        ctx: Context<'info, StartRebalanceOrca<'info>>,
+        params: StartRebalanceOrcaParams,
+    ) -> Result<()> {
+        start_rebalance_orca::handler(ctx, params)
+    }
+
     pub fn cancel_pending_rebalance(ctx: Context<CancelPendingRebalance>) -> Result<()> {
         cancel_pending_rebalance::handler(ctx)
     }
 
-    pub fn retry_pending_rebalance(
-        ctx: Context<RetryPendingRebalance>,
+    /// Phase two of the Orca two-transaction rebalance (OpenNew): open a new
+    /// position over the range stored in `pending_rebalance` and fund it. The
+    /// range is taken strictly from the pending state — callers supply amounts
+    /// only. Serves both the first attempt and every retry (fresh mint each).
+    pub fn retry_pending_rebalance<'info>(
+        ctx: Context<'info, RetryPendingRebalance<'info>>,
         params: RetryPendingRebalanceParams,
     ) -> Result<()> {
         retry_pending_rebalance::handler(ctx, params)
@@ -141,11 +167,18 @@ pub mod aargau_manager {
     }
 
     // -------------------------------------------------------------------------
-    // Keeper co-signed instructions (stubs — reserved for future use)
+    // Keeper co-signed instructions
     // -------------------------------------------------------------------------
 
     pub fn execute_action(ctx: Context<ExecuteAction>, params: ExecuteActionParams) -> Result<()> {
         execute_action::handler(ctx, params)
+    }
+
+    pub fn execute_action_orca<'info>(
+        ctx: Context<'info, ExecuteActionOrca<'info>>,
+        params: ExecuteActionOrcaParams,
+    ) -> Result<()> {
+        execute_action_orca::handler(ctx, params)
     }
 
     pub fn report_rebalance_attempt(
