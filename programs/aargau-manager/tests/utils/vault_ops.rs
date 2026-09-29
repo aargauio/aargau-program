@@ -205,3 +205,191 @@ mod reward_owner_bind_tests {
         );
     }
 }
+
+mod excess_lamports_tests {
+    use aargau_manager::utils::vault_ops::excess_lamports_above_rent;
+
+    #[test]
+    fn zero_when_at_or_below_minimum() {
+        assert_eq!(excess_lamports_above_rent(0, 0), 0);
+        assert_eq!(excess_lamports_above_rent(1_000, 1_000), 0);
+        assert_eq!(excess_lamports_above_rent(999, 1_000), 0);
+        assert_eq!(excess_lamports_above_rent(0, u64::MAX), 0);
+    }
+
+    #[test]
+    fn excess_above_minimum() {
+        assert_eq!(excess_lamports_above_rent(1_001, 1_000), 1);
+        assert_eq!(excess_lamports_above_rent(u64::MAX, 0), u64::MAX);
+        assert_eq!(excess_lamports_above_rent(u64::MAX, 1), u64::MAX - 1);
+    }
+}
+
+mod sweep_excess_vault_lamports_tests {
+    use crate::common::error_helpers::{aargau_err_code, err_code};
+    use aargau_manager::errors::AargauError;
+    use aargau_manager::state::{AutoRebalanceStrategy, Protocol, VaultAccount};
+    use aargau_manager::utils::vault_ops::sweep_excess_vault_lamports;
+    use anchor_lang::prelude::{Account, AccountInfo, Pubkey, Rent};
+    use anchor_lang::AccountSerialize;
+
+    fn fixed(byte: u8) -> Pubkey {
+        Pubkey::new_from_array([byte; 32])
+    }
+
+    fn user_key() -> Pubkey {
+        fixed(0x0B)
+    }
+
+    fn system_program() -> Pubkey {
+        Pubkey::default()
+    }
+
+    /// Serialized `VaultAccount` at its full allocated size.
+    fn vault_data() -> Vec<u8> {
+        let vault = VaultAccount {
+            user_authority: user_key(),
+            pool_address: fixed(0x0C),
+            protocol: Protocol::Raydium,
+            position_address: None,
+            position_mint: None,
+            position_range_lower: None,
+            position_range_upper: None,
+            uses_token_2022: false,
+            token_a_transfer_fee_bps: 0,
+            token_a_maximum_fee: 0,
+            token_b_transfer_fee_bps: 0,
+            token_b_maximum_fee: 0,
+            reward_token_0_transfer_fee_bps: 0,
+            reward_token_0_maximum_fee: 0,
+            reward_token_1_transfer_fee_bps: 0,
+            reward_token_1_maximum_fee: 0,
+            reward_token_2_transfer_fee_bps: 0,
+            reward_token_2_maximum_fee: 0,
+            allowed_ops: 0,
+            strategy: AutoRebalanceStrategy::default(),
+            last_rebalance_at: 0,
+            rebalances_today: 0,
+            gas_spent_today_usd_cents: 0,
+            last_day_reset: 0,
+            entry_value_usd: 0,
+            pending_rebalance: None,
+            created_at: 0,
+            bump: 255,
+            _padding: [0u8; 8],
+        };
+        let mut data = Vec::new();
+        vault.try_serialize(&mut data).unwrap();
+        data.resize(VaultAccount::LEN, 0);
+        data
+    }
+
+    fn rent_exempt_minimum() -> u64 {
+        Rent::default().minimum_balance(VaultAccount::LEN)
+    }
+
+    /// Runs the sweep against a vault holding `vault_lamports` and a user
+    /// account `user` holding `user_lamports`; returns (result, vault after,
+    /// user after).
+    fn run_sweep(
+        vault_lamports: u64,
+        user: Pubkey,
+        user_lamports: u64,
+    ) -> (anchor_lang::Result<u64>, u64, u64) {
+        let program_id = aargau_manager::ID;
+        let vault_key = fixed(0x0A);
+        let mut vault_balance = vault_lamports;
+        let mut data = vault_data();
+        let vault_info = AccountInfo::new(
+            &vault_key,
+            false,
+            true,
+            &mut vault_balance,
+            &mut data,
+            &program_id,
+            false,
+        );
+        let vault = Account::<VaultAccount>::try_from(&vault_info).unwrap();
+
+        let system = system_program();
+        let mut user_balance = user_lamports;
+        let mut user_data: Vec<u8> = Vec::new();
+        let user_info = AccountInfo::new(
+            &user,
+            true,
+            true,
+            &mut user_balance,
+            &mut user_data,
+            &system,
+            false,
+        );
+
+        let result = sweep_excess_vault_lamports(&vault, &user_info, &Rent::default());
+        let vault_after = vault_info.lamports();
+        let user_after = user_info.lamports();
+        (result, vault_after, user_after)
+    }
+
+    #[test]
+    fn moves_close_rent_refund_to_the_user() {
+        // e.g. personal_position + NFT account + NFT mint rent refunded by
+        // Raydium `close_position` to the vault PDA.
+        let refund = 5_000_000;
+        let min = rent_exempt_minimum();
+        let (result, vault_after, user_after) = run_sweep(min + refund, user_key(), 1_000);
+        assert_eq!(result.unwrap(), refund);
+        assert_eq!(vault_after, min);
+        assert_eq!(user_after, 1_000 + refund);
+    }
+
+    #[test]
+    fn single_lamport_excess_is_swept() {
+        let min = rent_exempt_minimum();
+        let (result, vault_after, user_after) = run_sweep(min + 1, user_key(), 0);
+        assert_eq!(result.unwrap(), 1);
+        assert_eq!(vault_after, min);
+        assert_eq!(user_after, 1);
+    }
+
+    #[test]
+    fn no_excess_is_a_no_op() {
+        let min = rent_exempt_minimum();
+        let (result, vault_after, user_after) = run_sweep(min, user_key(), 7);
+        assert_eq!(result.unwrap(), 0);
+        assert_eq!(vault_after, min);
+        assert_eq!(user_after, 7);
+    }
+
+    #[test]
+    fn below_minimum_is_a_no_op() {
+        let (result, vault_after, user_after) = run_sweep(1, user_key(), 7);
+        assert_eq!(result.unwrap(), 0);
+        assert_eq!(vault_after, 1);
+        assert_eq!(user_after, 7);
+    }
+
+    #[test]
+    fn rejects_destination_other_than_user_authority() {
+        let min = rent_exempt_minimum();
+        let attacker = fixed(0xAA);
+        let (result, vault_after, user_after) = run_sweep(min + 10, attacker, 0);
+        assert_eq!(
+            err_code(&result.unwrap_err()),
+            aargau_err_code(AargauError::UnauthorizedUser)
+        );
+        assert_eq!(vault_after, min + 10, "vault must be untouched");
+        assert_eq!(user_after, 0);
+    }
+
+    #[test]
+    fn user_balance_overflow_is_an_error_and_moves_nothing() {
+        let min = rent_exempt_minimum();
+        let (result, vault_after, user_after) = run_sweep(min + 1, user_key(), u64::MAX);
+        assert_eq!(
+            err_code(&result.unwrap_err()),
+            aargau_err_code(AargauError::Overflow)
+        );
+        assert_eq!(vault_after, min + 1);
+        assert_eq!(user_after, u64::MAX);
+    }
+}

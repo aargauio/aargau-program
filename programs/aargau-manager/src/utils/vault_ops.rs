@@ -1,4 +1,4 @@
-use crate::{constants::*, errors::AargauError};
+use crate::{constants::*, errors::AargauError, state::VaultAccount};
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, TransferChecked};
 
@@ -61,6 +61,52 @@ pub fn transfer_performance_fee<'info>(
         amount,
         decimals,
     )
+}
+
+/// Lamports held above the rent-exempt minimum. Returns 0 when the balance is
+/// at or below the minimum (nothing to sweep, and never an underflow).
+pub fn excess_lamports_above_rent(current_lamports: u64, rent_exempt_minimum: u64) -> u64 {
+    current_lamports.saturating_sub(rent_exempt_minimum)
+}
+
+/// Move every lamport the vault PDA holds above its rent-exempt minimum to
+/// `user`, which must be `vault.user_authority`. Returns the amount moved.
+///
+/// Needed after a protocol CPI that refunds rent to the vault PDA itself
+/// (Raydium `close_position` pays all reclaimed rent to `nft_owner`). Without
+/// the sweep those lamports would sit in the `VaultAccount`, and funds may
+/// only leave to the user. The program owns the vault account, so it debits
+/// the lamports directly; the vault stays rent-exempt for its data length.
+/// No-op when there is no excess.
+pub fn sweep_excess_vault_lamports<'info>(
+    vault: &Account<'info, VaultAccount>,
+    user: &AccountInfo<'info>,
+    rent: &Rent,
+) -> Result<u64> {
+    require_keys_eq!(
+        user.key(),
+        vault.user_authority,
+        AargauError::UnauthorizedUser
+    );
+
+    let vault_info = vault.to_account_info();
+    let rent_exempt_minimum = rent.minimum_balance(vault_info.data_len());
+    let excess = excess_lamports_above_rent(vault_info.lamports(), rent_exempt_minimum);
+    if excess == 0 {
+        return Ok(0);
+    }
+
+    let vault_after = vault_info
+        .lamports()
+        .checked_sub(excess)
+        .ok_or(AargauError::Underflow)?;
+    let user_after = user
+        .lamports()
+        .checked_add(excess)
+        .ok_or(AargauError::Overflow)?;
+    **vault_info.try_borrow_mut_lamports()? = vault_after;
+    **user.try_borrow_mut_lamports()? = user_after;
+    Ok(excess)
 }
 
 /// Custody bind for reward collection: the destination that a protocol's
