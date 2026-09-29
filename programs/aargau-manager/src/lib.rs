@@ -19,6 +19,11 @@
 //! - `execute_action_orca` — Orca Whirlpools position lifecycle
 //!   (OpenPosition, IncreaseLiquidity, DecreaseLiquidity, CollectFees+rewards, ClosePosition);
 //!   Token-2022 position NFT + v2 token path
+//! - `execute_action_raydium` — Raydium CLMM position lifecycle
+//!   (empty OpenPosition, IncreaseLiquidity, collect-then-DecreaseLiquidity,
+//!   CollectFees+rewards, ClosePosition with rent swept to the user);
+//!   Token-2022 position NFT + v2 token path; behind a verification gate
+//!   until the mollusk replay against the Raydium `.so` passes
 //! - `manual_rebalance` — user-signed atomic Meteora DLMM rebalance
 //!   (claim_fee2 + rebalance_liquidity in one transaction)
 //! - `start_rebalance_orca` — phase one of the Orca two-transaction rebalance
@@ -179,6 +184,19 @@ pub mod aargau_manager {
         params: ExecuteActionOrcaParams,
     ) -> Result<()> {
         execute_action_orca::handler(ctx, params)
+    }
+
+    /// Raydium CLMM position lifecycle, signed by the vault owner and gated by
+    /// the global pause. Open is empty (fund it with `IncreaseLiquidity`);
+    /// `DecreaseLiquidity` collects and splits LP fees before removing
+    /// principal; `ClosePosition` returns the refunded rent to the user.
+    /// `CollectFees` / `DecreaseLiquidity` take one reward triple per
+    /// initialized pool reward slot in `remaining_accounts`.
+    pub fn execute_action_raydium<'info>(
+        ctx: Context<'info, ExecuteActionRaydium<'info>>,
+        params: ExecuteActionRaydiumParams,
+    ) -> Result<()> {
+        execute_action_raydium::handler(ctx, params)
     }
 
     pub fn report_rebalance_attempt(

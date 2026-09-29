@@ -38,6 +38,9 @@ pub enum AargauError {
     #[msg("active_id_slippage exceeds the hard cap")]
     SlippageOutOfRange = 1010,
 
+    #[msg("Account is not an initialized SPL Token or Token-2022 token account")]
+    InvalidTokenAccount = 1011,
+
     // --- Authority (1100–1199) ---
     #[msg("Signer is not the vault user authority")]
     UnauthorizedUser = 1100,
@@ -102,6 +105,12 @@ pub enum AargauError {
 
     #[msg("Reward destination is not the vault's associated token account for the reward mint")]
     InvalidRewardOwner = 1308,
+
+    #[msg("Position still holds liquidity, fees or rewards owed — drain it before closing")]
+    PositionNotEmpty = 1309,
+
+    #[msg("LP fee measured from the pool vault outflow is inconsistent with the vault's balance change")]
+    LpFeeMeasurementMismatch = 1310,
 
     // --- Protocol state (1400–1499) ---
     #[msg("Program is paused — only emergency_withdraw, withdraw, and close_vault are allowed")]

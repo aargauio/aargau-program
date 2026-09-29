@@ -23,19 +23,20 @@ use crate::{
     errors::AargauError,
     events::RebalanceExecuted,
     state::{Protocol, ProtocolConfig, TriggeredBy, VaultAccount},
-    utils::orca::{
-        accounts::{
-            derive_position_pda, is_token_2022, read_transfer_fee_config,
-            require_v2_transferable_mint,
+    utils::{
+        orca::{
+            accounts::derive_position_pda,
+            increase_liquidity::{invoke_increase_liquidity_v2, IncreaseLiquidityV2Cpi},
+            open_position::{
+                invoke_open_position_with_token_extensions, OpenPositionWithTokenExtensionsCpi,
+            },
+            rebalance_helpers::require_tick_array,
+            whirlpool_view::{
+                parse_whirlpool_view_from_bytes, require_whirlpool_bindings, WhirlpoolView,
+            },
         },
-        increase_liquidity::{invoke_increase_liquidity_v2, IncreaseLiquidityV2Cpi},
-        open_position::{
-            invoke_open_position_with_token_extensions, OpenPositionWithTokenExtensionsCpi,
-        },
-        rebalance_helpers::{require_tick_array, VaultSignerSeedBytes},
-        whirlpool_view::{
-            parse_whirlpool_view_from_bytes, require_whirlpool_bindings, WhirlpoolView,
-        },
+        signer_seeds::VaultSignerSeedBytes,
+        token_2022::{is_token_2022, read_transfer_fee_config, require_v2_transferable_mint},
     },
 };
 use anchor_lang::prelude::*;

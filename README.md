@@ -10,9 +10,9 @@ The `VaultAccount` PDA is the **direct owner** of every LP position it manages. 
 
 | Protocol | Position model | Status |
 |---|---|---|
-| Meteora DLMM | Bin-based, single-tx atomic rebalance | CPIs in progress |
-| Orca Whirlpools | Tick-based, NFT-owned position, two-phase rebalance | Planned |
-| Raydium CLMM | Tick-based, PDA-owned position, two-phase rebalance | Planned |
+| Meteora DLMM | Bin-based, single-tx atomic rebalance | Position lifecycle + atomic rebalance implemented; replay against the pinned `.so` pending |
+| Orca Whirlpools | Tick-based, Token-2022 NFT-owned position, two-phase rebalance | Position lifecycle + two-phase rebalance implemented; replay against the pinned `.so` pending |
+| Raydium CLMM | Tick-based, Token-2022 NFT-owned position, two-phase rebalance | Position lifecycle implemented; replay against the pinned `.so` pending |
 
 ## Instructions
 
@@ -30,10 +30,13 @@ The `VaultAccount` PDA is the **direct owner** of every LP position it manages. 
 | Vault | `emergency_withdraw` | Implemented (bypasses `is_paused`) |
 | Vault | `close_vault` | Stub (CPI pending) |
 | Vault | `claim_rewards` | Stub (CPI pending) |
-| Vault | `manual_rebalance` | Stub (CPI pending) |
-| Vault | `cancel_pending_rebalance` | Stub |
-| Vault | `retry_pending_rebalance` | Stub |
-| Keeper | `execute_action` | Stub |
+| Vault | `manual_rebalance` | Implemented (Meteora atomic rebalance; verification gate) |
+| Vault | `start_rebalance_orca` | Implemented (Orca rebalance phase one) |
+| Vault | `retry_pending_rebalance` | Implemented (Orca rebalance phase two) |
+| Vault | `cancel_pending_rebalance` | Implemented (no pause gate) |
+| Keeper | `execute_action` | Implemented (Meteora position lifecycle; user-signed) |
+| Keeper | `execute_action_orca` | Implemented (Orca position lifecycle; user-signed) |
+| Keeper | `execute_action_raydium` | Implemented (Raydium position lifecycle; user-signed; verification gate) |
 | Keeper | `report_rebalance_attempt` | Stub |
 
 ## Build and test
@@ -72,13 +75,20 @@ programs/aargau-manager/src/
 │   ├── admin/          # initialize_protocol, set_protocol_pause, update_protocol_config,
 │   │                   # withdraw_treasury, transfer_admin, admin_emergency_transfer
 │   ├── vault/          # create_vault, deposit, withdraw, emergency_withdraw, close_vault,
-│   │                   # claim_rewards, manual_rebalance, cancel_pending_rebalance,
-│   │                   # retry_pending_rebalance
-│   └── keeper/         # execute_action, report_rebalance_attempt
+│   │                   # claim_rewards, manual_rebalance, start_rebalance_orca,
+│   │                   # retry_pending_rebalance, cancel_pending_rebalance
+│   └── keeper/         # execute_action, execute_action_orca, execute_action_raydium,
+│                       # report_rebalance_attempt
 └── utils/
     ├── fee.rs              # calc_aargau_fee, calc_net_after_transfer_fee
     ├── pool_validation.rs  # 4-layer pool validation (owner, discriminator, mints, extensions)
-    └── signer_seeds.rs     # vault PDA signer-seed helper
+    ├── signer_seeds.rs     # vault PDA signer-seed helper
+    ├── token_2022.rs       # Token-2022 mint inspection (extensions, transfer fees)
+    ├── token_account.rs    # bounds-checked SPL / Token-2022 token-account reader
+    ├── vault_ops.rs        # performance-fee transfer, reward-owner binding, lamport sweep
+    ├── meteora/            # Meteora DLMM account views + raw CPI builders
+    ├── orca/               # Orca Whirlpools account views + raw CPI builders
+    └── raydium/            # Raydium CLMM account views + raw CPI builders
 ```
 
 ## Account sizes

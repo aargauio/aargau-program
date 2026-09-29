@@ -1,0 +1,18 @@
+# Raydium CLMM USTM/USDT, tick_spacing 10, SPL Token mints.
+# Active reward 0 is paid in USTM == mint_0: its mint is mint_0 below, so it
+# is not listed twice. Re-capture with: sh ../../dump-raydium-fixtures.sh snapshots <this dir>
+# Tick arrays -41400, -40200 and -37800..-36600 did not exist at capture.
+# label pubkey
+pool_state 5jyqmaMwichK6rcXzM69krSujDvzR8pDGv5i8kBAKEM4
+amm_config J8u7HvA1g1p2CdhBFdsnTxDzGkekRpdw4GrL9MKU2D3U
+observation_state 2sBGZ6ZYMMcgv1Txik5jgqB4ut8gU3QbKEYqB6fad4HC
+token_vault_0 211zMqbSxifdiYivQ3MQoxqBHXcVeNbY2Hb2BJkudm8B
+token_vault_1 AviPg3dFMuLwGWXov9pwsE5CiR2JyedPeLvno7H9aN5L
+mint_0 uYaEedWW3eTTW7TAMSCw32NvbBcEkiG5fRUcR4kAH4y
+mint_1 Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
+tick_array_bitmap_extension 7fwkzjv3d2yymfRL5BCbXZcZC9VtMKxqWib66Sixbkmk
+reward_0_vault Dp76wnWAiC6y2MvPsn77yDdEpwDmTUHKxibdUq2YCvuR
+tick_array_-40800 9QWnMeSiuLvhUvDy7nuoEmcbkDsx7bMBN57Y6nm4BoRD
+tick_array_-39600 BhLuzZv5FBrnNvPT6M5aejv4hi6yy9cn3acr9y9iwpno
+tick_array_-39000 DzVn1FSWKtwwoEZEJjHbLCpxPdJD2tDq7jgq38A5WUqz
+tick_array_-38400 GMBW89WSMs3pjtB2esY73Nf5S8YfzJL9N9z3wFExZ9gg
