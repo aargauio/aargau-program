@@ -37,11 +37,7 @@ use crate::{
     utils::{
         fee::calc_aargau_fee,
         orca::{
-            accounts::{
-                derive_position_pda, is_token_2022, read_transfer_fee_config,
-                require_orca_position, require_reward_owner_is_vault_ata,
-                require_v2_transferable_mint,
-            },
+            accounts::{derive_position_pda, require_orca_position},
             close_position::{
                 invoke_close_position_with_token_extensions, ClosePositionWithTokenExtensionsCpi,
             },
@@ -54,13 +50,14 @@ use crate::{
             open_position::{
                 invoke_open_position_with_token_extensions, OpenPositionWithTokenExtensionsCpi,
             },
-            rebalance_helpers::{
-                require_tick_array, transfer_performance_fee, VaultSignerSeedBytes,
-            },
+            rebalance_helpers::require_tick_array,
             whirlpool_view::{
                 parse_whirlpool_view_from_bytes, require_whirlpool_bindings, WhirlpoolView,
             },
         },
+        signer_seeds::VaultSignerSeedBytes,
+        token_2022::{is_token_2022, read_transfer_fee_config, require_v2_transferable_mint},
+        vault_ops::{require_reward_owner_is_vault_ata, transfer_performance_fee},
     },
 };
 use anchor_lang::prelude::*;
