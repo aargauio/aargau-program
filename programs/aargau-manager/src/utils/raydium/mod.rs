@@ -19,6 +19,10 @@
 //! - `close_position` refunds all rent to the vault PDA, which the caller
 //!   sweeps back to the user;
 //! - the tick-array bitmap extension is always forwarded.
+//!
+//! `vault_position` composes the builders with the custodial checks that must
+//! travel with them (fee split, min-out, max-in); `position_guards` holds the
+//! pure rules every Raydium instruction shares.
 
 pub mod accounts;
 pub mod close_position;
@@ -28,7 +32,9 @@ pub mod lp_fee;
 pub mod open_position;
 pub mod personal_position_view;
 pub mod pool_state_view;
+pub mod position_guards;
 pub mod reward_accounts;
+pub mod vault_position;
 
 pub use accounts::*;
 pub use close_position::*;
@@ -38,4 +44,6 @@ pub use lp_fee::*;
 pub use open_position::*;
 pub use personal_position_view::*;
 pub use pool_state_view::*;
+pub use position_guards::*;
 pub use reward_accounts::*;
+pub use vault_position::*;

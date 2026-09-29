@@ -12,7 +12,7 @@ The `VaultAccount` PDA is the **direct owner** of every LP position it manages. 
 |---|---|---|
 | Meteora DLMM | Bin-based, single-tx atomic rebalance | Position lifecycle + atomic rebalance implemented; replay against the pinned `.so` pending |
 | Orca Whirlpools | Tick-based, Token-2022 NFT-owned position, two-phase rebalance | Position lifecycle + two-phase rebalance implemented; replay against the pinned `.so` pending |
-| Raydium CLMM | Tick-based, Token-2022 NFT-owned position, two-phase rebalance | Position lifecycle implemented; replay against the pinned `.so` pending |
+| Raydium CLMM | Tick-based, Token-2022 NFT-owned position, two-phase rebalance | Position lifecycle + two-phase rebalance implemented; replay against the pinned `.so` pending |
 
 ## Instructions
 
@@ -33,6 +33,8 @@ The `VaultAccount` PDA is the **direct owner** of every LP position it manages. 
 | Vault | `manual_rebalance` | Implemented (Meteora atomic rebalance; verification gate) |
 | Vault | `start_rebalance_orca` | Implemented (Orca rebalance phase one) |
 | Vault | `retry_pending_rebalance` | Implemented (Orca rebalance phase two) |
+| Vault | `start_rebalance_raydium` | Implemented (Raydium rebalance phase one; verification gate) |
+| Vault | `retry_pending_rebalance_raydium` | Implemented (Raydium rebalance phase two; verification gate) |
 | Vault | `cancel_pending_rebalance` | Implemented (no pause gate) |
 | Keeper | `execute_action` | Implemented (Meteora position lifecycle; user-signed) |
 | Keeper | `execute_action_orca` | Implemented (Orca position lifecycle; user-signed) |
@@ -76,7 +78,8 @@ programs/aargau-manager/src/
 │   │                   # withdraw_treasury, transfer_admin, admin_emergency_transfer
 │   ├── vault/          # create_vault, deposit, withdraw, emergency_withdraw, close_vault,
 │   │                   # claim_rewards, manual_rebalance, start_rebalance_orca,
-│   │                   # retry_pending_rebalance, cancel_pending_rebalance
+│   │                   # retry_pending_rebalance, start_rebalance_raydium,
+│   │                   # retry_pending_rebalance_raydium, cancel_pending_rebalance
 │   └── keeper/         # execute_action, execute_action_orca, execute_action_raydium,
 │                       # report_rebalance_attempt
 └── utils/

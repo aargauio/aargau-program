@@ -1,4 +1,9 @@
-use crate::{constants::*, errors::AargauError, state::VaultAccount};
+use crate::{
+    constants::*,
+    errors::AargauError,
+    state::VaultAccount,
+    utils::token_2022::{is_token_2022, read_transfer_fee_snapshot},
+};
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, TransferChecked};
 
@@ -67,6 +72,26 @@ pub fn transfer_performance_fee<'info>(
 /// at or below the minimum (nothing to sweep, and never an underflow).
 pub fn excess_lamports_above_rent(current_lamports: u64, rent_exempt_minimum: u64) -> u64 {
     current_lamports.saturating_sub(rent_exempt_minimum)
+}
+
+/// Record the pair mints' Token-2022 transfer-fee config on the vault when a
+/// position is opened. A mint can change its config between epochs, so every
+/// open re-reads the live mints instead of keeping an older snapshot. SPL
+/// classic mints and Token-2022 mints without the extension record zero.
+pub fn record_pair_transfer_fees(
+    vault: &mut VaultAccount,
+    mint_a: &AccountInfo<'_>,
+    mint_b: &AccountInfo<'_>,
+) -> Result<()> {
+    let fee_a = read_transfer_fee_snapshot(mint_a)?;
+    let fee_b = read_transfer_fee_snapshot(mint_b)?;
+
+    vault.uses_token_2022 = is_token_2022(mint_a.owner) || is_token_2022(mint_b.owner);
+    vault.token_a_transfer_fee_bps = fee_a.transfer_fee_bps;
+    vault.token_a_maximum_fee = fee_a.maximum_fee;
+    vault.token_b_transfer_fee_bps = fee_b.transfer_fee_bps;
+    vault.token_b_maximum_fee = fee_b.maximum_fee;
+    Ok(())
 }
 
 /// Move every lamport the vault PDA holds above its rent-exempt minimum to

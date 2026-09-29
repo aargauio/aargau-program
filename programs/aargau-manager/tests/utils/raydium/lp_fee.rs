@@ -184,3 +184,57 @@ mod measure_lp_fee_received_tests {
         );
     }
 }
+
+mod lp_fee_split_tests {
+    use aargau_manager::utils::raydium::lp_fee::{split_lp_fee, LpFeeSplit};
+
+    #[test]
+    fn zero_fee_splits_to_zero() {
+        assert_eq!(
+            split_lp_fee(0, 2_000).unwrap(),
+            LpFeeSplit {
+                gross: 0,
+                aargau_fee: 0,
+                user_net: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn one_unit_rounds_the_protocol_fee_down() {
+        assert_eq!(
+            split_lp_fee(1, 2_000).unwrap(),
+            LpFeeSplit {
+                gross: 1,
+                aargau_fee: 0,
+                user_net: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn typical_split_at_the_fee_cap() {
+        assert_eq!(
+            split_lp_fee(1_000_000, 2_000).unwrap(),
+            LpFeeSplit {
+                gross: 1_000_000,
+                aargau_fee: 200_000,
+                user_net: 800_000,
+            }
+        );
+    }
+
+    #[test]
+    fn u64_max_does_not_overflow_and_legs_sum_to_gross() {
+        let split = split_lp_fee(u64::MAX, 2_000).unwrap();
+        assert_eq!(split.aargau_fee, u64::MAX / 5);
+        assert_eq!(split.aargau_fee + split.user_net, u64::MAX);
+    }
+
+    #[test]
+    fn zero_rate_leaves_everything_to_the_user() {
+        let split = split_lp_fee(12_345, 0).unwrap();
+        assert_eq!(split.aargau_fee, 0);
+        assert_eq!(split.user_net, 12_345);
+    }
+}

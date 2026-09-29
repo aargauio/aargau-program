@@ -7,5 +7,7 @@ pub mod emergency_withdraw;
 pub mod manual_rebalance;
 pub mod manual_rebalance_meteora;
 pub mod retry_pending_rebalance;
+pub mod retry_pending_rebalance_raydium;
 pub mod start_rebalance_orca;
+pub mod start_rebalance_raydium;
 pub mod withdraw;
