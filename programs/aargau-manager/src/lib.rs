@@ -30,8 +30,13 @@
 //!   (collect fees + drain + close old position; persist target range)
 //! - `retry_pending_rebalance` — phase two (open new Orca position over the
 //!   stored range + fund); idempotent, serves first attempt and every retry
+//! - `start_rebalance_raydium` — phase one of the Raydium CLMM two-transaction
+//!   rebalance (collect fees + drain the on-chain liquidity + close; rent
+//!   swept to the user; persist target range); behind a verification gate
+//! - `retry_pending_rebalance_raydium` — phase two for Raydium (empty open +
+//!   vault-signed increase over the stored range); behind a verification gate
 //! - `cancel_pending_rebalance` — clear a stuck pending rebalance (no pause
-//!   gate); tokens remain in the vault ATAs, withdrawable
+//!   gate, any protocol); tokens remain in the vault ATAs, withdrawable
 //!
 //! ## Stubs (correct signatures, reserved for future implementation):
 //! - `close_vault`, `claim_rewards`, `update_protocol_config`,
@@ -136,6 +141,30 @@ pub mod aargau_manager {
         params: RetryPendingRebalanceParams,
     ) -> Result<()> {
         retry_pending_rebalance::handler(ctx, params)
+    }
+
+    /// Phase one of the Raydium CLMM two-transaction rebalance (CloseOld):
+    /// collect and split fees, drain the position's full on-chain liquidity,
+    /// close it (rent swept to the user) and persist the target range in
+    /// `pending_rebalance`. `remaining_accounts` carries one reward triple per
+    /// initialized pool reward slot. Completed by
+    /// `retry_pending_rebalance_raydium`.
+    pub fn start_rebalance_raydium<'info>(
+        ctx: Context<'info, StartRebalanceRaydium<'info>>,
+        params: StartRebalanceRaydiumParams,
+    ) -> Result<()> {
+        start_rebalance_raydium::handler(ctx, params)
+    }
+
+    /// Phase two of the Raydium CLMM two-transaction rebalance (OpenNew):
+    /// open an empty position over the range stored in `pending_rebalance`
+    /// and fund it from the vault. Callers supply amounts only; each attempt
+    /// needs a fresh NFT mint keypair.
+    pub fn retry_pending_rebalance_raydium<'info>(
+        ctx: Context<'info, RetryPendingRebalanceRaydium<'info>>,
+        params: RetryPendingRebalanceRaydiumParams,
+    ) -> Result<()> {
+        retry_pending_rebalance_raydium::handler(ctx, params)
     }
 
     // -------------------------------------------------------------------------
