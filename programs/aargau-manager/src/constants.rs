@@ -36,24 +36,27 @@ pub const METEORA_LB_PAIR_DISCRIMINATOR: [u8; 8] = [33, 11, 49, 98, 181, 101, 17
 // ---------------------------------------------------------------------------
 // Pool layout byte offsets for mint validation in create_vault (layer 3).
 //
-// Semantics differ per protocol — `pool_validation` selects the right
-// arithmetic per `Protocol` variant:
-//   - Orca / Raydium: offsets are RELATIVE to the byte AFTER the 8-byte
-//     Anchor discriminator (handler adds 8 before slicing).
-//   - Meteora: offsets are ABSOLUTE into the raw account data buffer (the
-//     8-byte discriminator already counts as bytes 0..8). This matches the
-//     parser at `utils/meteora/lb_pair_view`
-//     (`LB_PAIR_TOKEN_X_MINT_OFFSET = 88`, `LB_PAIR_TOKEN_Y_MINT_OFFSET = 120`).
+// Every offset is ABSOLUTE into the raw account data buffer: the 8-byte
+// Anchor discriminator counts as bytes 0..8. They match the protocol parsers
+// at `utils/orca/whirlpool_view` (`WHIRLPOOL_TOKEN_MINT_A_OFFSET = 101`,
+// `WHIRLPOOL_TOKEN_MINT_B_OFFSET = 181`) and `utils/meteora/lb_pair_view`
+// (`LB_PAIR_TOKEN_X_MINT_OFFSET = 88`, `LB_PAIR_TOKEN_Y_MINT_OFFSET = 120`).
 // ---------------------------------------------------------------------------
 
-/// Byte offset of token_mint_a inside Orca Whirlpool data (post-discriminator)
+/// Absolute byte offset of token_mint_a inside Orca Whirlpool data:
+/// discriminator 8 + whirlpools_config 32 + whirlpool_bump 1 + tick_spacing 2
+/// + fee_tier_index_seed 2 + fee_rate 2 + protocol_fee_rate 2 + liquidity 16
+/// + sqrt_price 16 + tick_current_index 4 + protocol_fee_owed_a/b 8 + 8.
 pub const ORCA_MINT_A_OFFSET: usize = 101;
-/// Byte offset of token_mint_b inside Orca Whirlpool data (post-discriminator)
+/// Absolute byte offset of token_mint_b inside Orca Whirlpool data:
+/// token_mint_a 101 + 32 + token_vault_a 32 + fee_growth_global_a 16.
 pub const ORCA_MINT_B_OFFSET: usize = 181;
 
-/// Byte offset of token_mint_0 inside Raydium PoolState data (post-discriminator)
+/// Absolute byte offset of token_mint_0 inside Raydium CLMM PoolState data:
+/// discriminator 8 + bump 1 + amm_config 32 + owner 32.
 pub const RAYDIUM_MINT_A_OFFSET: usize = 73;
-/// Byte offset of token_mint_1 inside Raydium PoolState data (post-discriminator)
+/// Absolute byte offset of token_mint_1 inside Raydium CLMM PoolState data:
+/// token_mint_0 73 + 32.
 pub const RAYDIUM_MINT_B_OFFSET: usize = 105;
 
 /// Absolute byte offset of token_x_mint inside Meteora LbPair data
