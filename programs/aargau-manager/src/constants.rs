@@ -164,6 +164,136 @@ pub const ORCA_POSITION_SEED: &[u8] = b"position";
 /// the ASCII decimal string of the start index, not its LE bytes).
 pub const ORCA_TICK_ARRAY_SEED: &[u8] = b"tick_array";
 
+/// SPL Token (classic) program. Raydium CLMM's `_v2` liquidity instructions
+/// carry it in a fixed slot next to Token-2022 and pick per transfer by the
+/// source token account's owner.
+pub const SPL_TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
+// ---------------------------------------------------------------------------
+// Raydium CLMM instruction discriminators (Anchor 8-byte: sha256("global:<name>")[0..8])
+//
+// Re-derived in `tests/constants.rs`. Account orders and arg layouts are
+// documented in the `//!` header of each builder under `utils/raydium/`.
+// ---------------------------------------------------------------------------
+
+/// `open_position_with_token22_nft(tick_lower_index: i32, tick_upper_index: i32,
+///     tick_array_lower_start_index: i32, tick_array_upper_start_index: i32,
+///     liquidity: u128, amount_0_max: u64, amount_1_max: u64,
+///     with_metadata: bool, base_flag: Option<bool>)`.
+pub const RAYDIUM_OPEN_POSITION_WITH_TOKEN22_NFT_DISCRIMINATOR: [u8; 8] =
+    [77, 255, 174, 82, 125, 29, 201, 46];
+
+/// `increase_liquidity_v2(liquidity: u128, amount_0_max: u64, amount_1_max: u64,
+///     base_flag: Option<bool>)`.
+pub const RAYDIUM_INCREASE_LIQUIDITY_V2_DISCRIMINATOR: [u8; 8] =
+    [133, 29, 89, 223, 69, 238, 176, 10];
+
+/// `decrease_liquidity_v2(liquidity: u128, amount_0_min: u64, amount_1_min: u64)`.
+/// Also pays out every fee and reward owed to the position.
+pub const RAYDIUM_DECREASE_LIQUIDITY_V2_DISCRIMINATOR: [u8; 8] =
+    [58, 127, 188, 62, 79, 82, 196, 96];
+
+/// `close_position()` — burns the position NFT and closes the NFT account,
+/// the NFT mint and `PersonalPositionState`; all rent goes to `nft_owner`.
+pub const RAYDIUM_CLOSE_POSITION_DISCRIMINATOR: [u8; 8] = [123, 134, 81, 0, 49, 68, 98, 98];
+
+// ---------------------------------------------------------------------------
+// Raydium CLMM account discriminators (sha256("account:<Name>")[0..8])
+// ---------------------------------------------------------------------------
+
+/// `PersonalPositionState` — the per-NFT position account.
+pub const RAYDIUM_PERSONAL_POSITION_DISCRIMINATOR: [u8; 8] = [70, 111, 150, 126, 230, 15, 25, 117];
+
+/// `TickArrayState`.
+pub const RAYDIUM_TICK_ARRAY_DISCRIMINATOR: [u8; 8] = [192, 155, 85, 205, 49, 249, 129, 42];
+
+/// `TickArrayBitmapExtension`.
+pub const RAYDIUM_TICK_ARRAY_BITMAP_EXTENSION_DISCRIMINATOR: [u8; 8] =
+    [60, 150, 36, 219, 97, 128, 139, 153];
+
+// ---------------------------------------------------------------------------
+// Raydium CLMM PDA seeds
+// ---------------------------------------------------------------------------
+
+/// `PersonalPositionState` PDA: `[b"position", nft_mint]`.
+pub const RAYDIUM_POSITION_SEED: &[u8] = b"position";
+
+/// `TickArrayState` PDA: `[b"tick_array", pool_state, start_tick_index.to_be_bytes()]`.
+/// The third seed is the **big-endian** i32 — not Orca's ASCII string.
+pub const RAYDIUM_TICK_ARRAY_SEED: &[u8] = b"tick_array";
+
+/// `TickArrayBitmapExtension` PDA: `[b"pool_tick_array_bitmap_extension", pool_state]`.
+/// Created together with every pool.
+pub const RAYDIUM_TICK_ARRAY_BITMAP_EXTENSION_SEED: &[u8] = b"pool_tick_array_bitmap_extension";
+
+// ---------------------------------------------------------------------------
+// Raydium CLMM layout constants
+// ---------------------------------------------------------------------------
+
+/// Number of ticks packed inside a single Raydium `TickArrayState`.
+pub const RAYDIUM_TICK_ARRAY_SIZE: i32 = 60;
+
+/// Reward slots in a Raydium pool / position.
+pub const RAYDIUM_REWARD_SLOTS: usize = 3;
+
+/// Accounts appended to `decrease_liquidity_v2` per initialized reward slot:
+/// `[reward_vault, recipient, reward_mint]`.
+pub const RAYDIUM_REWARD_ACCOUNTS_PER_SLOT: usize = 3;
+
+/// `protocol_position` slot value forwarded to open / increase / decrease.
+///
+/// The account is deprecated on the deployed program: it is an
+/// `UncheckedAccount` with no seeds, no `mut` and no reads, so any key is
+/// accepted. We forward the CLMM program id because it is already part of
+/// every Raydium call (no extra transaction account), it is read-only and it
+/// can never alias one of the writable accounts in the same CPI.
+pub const RAYDIUM_PROTOCOL_POSITION_PLACEHOLDER: Pubkey = RAYDIUM_CLMM_PROGRAM_ID;
+
+// `PoolState` absolute offsets (the 8-byte discriminator is bytes 0..8).
+// The account is `#[repr(C, packed)]`, so there is no alignment padding.
+
+/// `PoolState.token_mint_0` (absolute; same value as `RAYDIUM_MINT_A_OFFSET`).
+pub const RAYDIUM_POOL_TOKEN_MINT_0_OFFSET: usize = 73;
+/// `PoolState.token_mint_1` (absolute; same value as `RAYDIUM_MINT_B_OFFSET`).
+pub const RAYDIUM_POOL_TOKEN_MINT_1_OFFSET: usize = 105;
+/// `PoolState.token_vault_0`.
+pub const RAYDIUM_POOL_TOKEN_VAULT_0_OFFSET: usize = 137;
+/// `PoolState.token_vault_1`.
+pub const RAYDIUM_POOL_TOKEN_VAULT_1_OFFSET: usize = 169;
+/// `PoolState.tick_spacing` (u16 LE).
+pub const RAYDIUM_POOL_TICK_SPACING_OFFSET: usize = 235;
+/// Start of `PoolState.reward_infos: [RewardInfo; 3]`.
+pub const RAYDIUM_POOL_REWARD_INFOS_OFFSET: usize = 397;
+/// Size of one packed `RewardInfo`.
+pub const RAYDIUM_POOL_REWARD_INFO_STRIDE: usize = 169;
+/// `RewardInfo.token_mint`, relative to the start of the slot. A slot is
+/// initialized iff this key is not `Pubkey::default()`.
+pub const RAYDIUM_REWARD_INFO_TOKEN_MINT_RELATIVE_OFFSET: usize = 57;
+/// `RewardInfo.token_vault`, relative to the start of the slot.
+pub const RAYDIUM_REWARD_INFO_TOKEN_VAULT_RELATIVE_OFFSET: usize = 89;
+
+// `PersonalPositionState` absolute offsets (Borsh, fixed size).
+
+/// Full `PersonalPositionState` account size.
+pub const RAYDIUM_PERSONAL_POSITION_LEN: usize = 281;
+/// `PersonalPositionState.nft_mint`.
+pub const RAYDIUM_PERSONAL_POSITION_NFT_MINT_OFFSET: usize = 9;
+/// `PersonalPositionState.pool_id`.
+pub const RAYDIUM_PERSONAL_POSITION_POOL_ID_OFFSET: usize = 41;
+/// `PersonalPositionState.tick_lower_index` (i32 LE).
+pub const RAYDIUM_PERSONAL_POSITION_TICK_LOWER_OFFSET: usize = 73;
+/// `PersonalPositionState.tick_upper_index` (i32 LE).
+pub const RAYDIUM_PERSONAL_POSITION_TICK_UPPER_OFFSET: usize = 77;
+/// `PersonalPositionState.liquidity` (u128 LE).
+pub const RAYDIUM_PERSONAL_POSITION_LIQUIDITY_OFFSET: usize = 81;
+/// `PersonalPositionState.token_fees_owed_0` (u64 LE).
+pub const RAYDIUM_PERSONAL_POSITION_FEES_OWED_0_OFFSET: usize = 129;
+/// `PersonalPositionState.token_fees_owed_1` (u64 LE).
+pub const RAYDIUM_PERSONAL_POSITION_FEES_OWED_1_OFFSET: usize = 137;
+/// `PersonalPositionState.reward_infos[i].reward_amount_owed` (u64 LE), per slot.
+pub const RAYDIUM_PERSONAL_POSITION_REWARD_OWED_OFFSETS: [usize; RAYDIUM_REWARD_SLOTS] =
+    [161, 185, 209];
+
 // ---------------------------------------------------------------------------
 // Meteora bin layout / DLMM constants
 // ---------------------------------------------------------------------------

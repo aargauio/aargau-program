@@ -38,6 +38,9 @@ pub enum AargauError {
     #[msg("active_id_slippage exceeds the hard cap")]
     SlippageOutOfRange = 1010,
 
+    #[msg("Account is not an initialized SPL Token or Token-2022 token account")]
+    InvalidTokenAccount = 1011,
+
     // --- Authority (1100–1199) ---
     #[msg("Signer is not the vault user authority")]
     UnauthorizedUser = 1100,

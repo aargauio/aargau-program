@@ -37,6 +37,11 @@ mod error_code_tests {
         assert_eq!(AargauError::InvalidPublicKey as u32, 1005);
     }
 
+    #[test]
+    fn test_invalid_token_account_discriminant() {
+        assert_eq!(AargauError::InvalidTokenAccount as u32, 1011);
+    }
+
     // --- Authority range: 1100–1199 ---
 
     #[test]
