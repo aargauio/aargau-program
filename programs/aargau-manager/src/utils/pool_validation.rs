@@ -33,46 +33,33 @@ pub fn validate_pool_owner_and_discriminator(pool: &AccountInfo, protocol: Proto
     Ok(())
 }
 
-/// Resolve a mint offset constant to an absolute index into the raw account
-/// data buffer.
-///
-/// Orca/Raydium offsets are stored as post-discriminator (relative to byte 8);
-/// Meteora offsets are stored as absolute. The asymmetry is documented next
-/// to the constants in `constants.rs`.
-fn absolute_mint_offset(protocol: Protocol, offset: usize) -> usize {
-    match protocol {
-        Protocol::Orca | Protocol::Raydium => 8 + offset,
-        Protocol::Meteora => offset,
-    }
-}
-
 /// Read the mint_a Pubkey from raw pool account data (including the 8-byte
-/// Anchor discriminator). Returns an error if data is too short.
+/// Anchor discriminator; offsets are absolute). Returns an error if data is
+/// too short.
 pub fn read_mint_a(data: &[u8], protocol: Protocol) -> Result<Pubkey> {
     let offset = match protocol {
         Protocol::Orca => ORCA_MINT_A_OFFSET,
         Protocol::Raydium => RAYDIUM_MINT_A_OFFSET,
         Protocol::Meteora => METEORA_MINT_A_OFFSET,
     };
-    let raw_offset = absolute_mint_offset(protocol, offset);
-    require!(data.len() >= raw_offset + 32, AargauError::InvalidPool);
-    let bytes: [u8; 32] = data[raw_offset..raw_offset + 32]
+    require!(data.len() >= offset + 32, AargauError::InvalidPool);
+    let bytes: [u8; 32] = data[offset..offset + 32]
         .try_into()
         .map_err(|_| AargauError::InvalidPool)?;
     Ok(Pubkey::from(bytes))
 }
 
 /// Read the mint_b Pubkey from raw pool account data (including the 8-byte
-/// Anchor discriminator). Returns an error if data is too short.
+/// Anchor discriminator; offsets are absolute). Returns an error if data is
+/// too short.
 pub fn read_mint_b(data: &[u8], protocol: Protocol) -> Result<Pubkey> {
     let offset = match protocol {
         Protocol::Orca => ORCA_MINT_B_OFFSET,
         Protocol::Raydium => RAYDIUM_MINT_B_OFFSET,
         Protocol::Meteora => METEORA_MINT_B_OFFSET,
     };
-    let raw_offset = absolute_mint_offset(protocol, offset);
-    require!(data.len() >= raw_offset + 32, AargauError::InvalidPool);
-    let bytes: [u8; 32] = data[raw_offset..raw_offset + 32]
+    require!(data.len() >= offset + 32, AargauError::InvalidPool);
+    let bytes: [u8; 32] = data[offset..offset + 32]
         .try_into()
         .map_err(|_| AargauError::InvalidPool)?;
     Ok(Pubkey::from(bytes))
