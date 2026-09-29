@@ -21,9 +21,19 @@
 //! - the tick-array bitmap extension is always forwarded.
 
 pub mod accounts;
+pub mod close_position;
+pub mod decrease_liquidity;
+pub mod increase_liquidity;
+pub mod open_position;
 pub mod personal_position_view;
 pub mod pool_state_view;
+pub mod reward_accounts;
 
 pub use accounts::*;
+pub use close_position::*;
+pub use decrease_liquidity::*;
+pub use increase_liquidity::*;
+pub use open_position::*;
 pub use personal_position_view::*;
 pub use pool_state_view::*;
+pub use reward_accounts::*;
