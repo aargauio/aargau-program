@@ -58,37 +58,34 @@ use crate::{
         TREASURY_SEED,
     },
     errors::AargauError,
-    events::{FeesClaimed, LiquidityChanged, LiquidityOp, PositionClosed, PositionOpened},
+    events::{LiquidityChanged, LiquidityOp, PositionClosed, PositionOpened},
     state::{Protocol, ProtocolConfig, RaydiumKeeperAction, TriggeredBy, VaultAccount},
     utils::{
-        fee::calc_aargau_fee,
         raydium::{
             accounts::{
                 derive_personal_position_pda, derive_position_nft_account, require_tick_array,
                 require_tick_array_bitmap_extension,
             },
-            close_position::{invoke_close_position, ClosePositionCpi},
-            decrease_liquidity::{invoke_decrease_liquidity_v2, DecreaseLiquidityV2Cpi},
-            increase_liquidity::{invoke_increase_liquidity_v2, IncreaseLiquidityV2Cpi},
-            lp_fee::{measure_lp_fee_received, LpFeeLegBalances},
-            open_position::{invoke_open_position_with_token22_nft, OpenPositionWithToken22NftCpi},
             personal_position_view::{
                 read_personal_position_view, require_personal_position_bindings,
                 PersonalPositionView,
             },
             pool_state_view::{read_pool_state_view, require_pool_state_bindings, PoolStateView},
+            position_guards::{is_fresh_position_nft_mint, require_raydium_position_empty},
             reward_accounts::{
                 bind_reward_transfer_accounts, expected_reward_account_count,
                 RewardTransferAccounts,
             },
+            vault_position::{
+                close_empty_position, collect_lp_fees_to_treasury, decrease_principal_to_vault,
+                increase_liquidity_from_vault, open_empty_position, OpenPositionFundingAccounts,
+                PairLegAccounts, PositionPayoutAccounts, RaydiumPositionAccounts,
+                TreasuryFeeAccounts,
+            },
         },
         signer_seeds::VaultSignerSeedBytes,
-        token_2022::{
-            is_token_2022, read_epoch_transfer_fee, read_transfer_fee_snapshot,
-            require_v2_transferable_mint_account, TransferFeeSnapshot,
-        },
-        token_account::read_token_account_view,
-        vault_ops::{sweep_excess_vault_lamports, transfer_performance_fee},
+        token_2022::require_v2_transferable_mint_account,
+        vault_ops::{record_pair_transfer_fees, sweep_excess_vault_lamports},
     },
 };
 use anchor_lang::prelude::*;
@@ -96,12 +93,6 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token_interface::{Mint, TokenAccount},
 };
-
-/// A zero-liquidity `decrease_liquidity_v2` only pays out fees and rewards
-/// owed. Raydium skips its slippage check when `liquidity == 0` and no
-/// principal moves, so zero minimums disable nothing here.
-const COLLECT_ONLY_LIQUIDITY: u128 = 0;
-const COLLECT_ONLY_MIN_AMOUNT: u64 = 0;
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct ExecuteActionRaydiumParams {
@@ -394,32 +385,25 @@ fn handle_open_position<'info>(
     require_v2_transferable_mint_account(&accounts.mint_a.to_account_info())?;
     require_v2_transferable_mint_account(&accounts.mint_b.to_account_info())?;
 
-    let cpi = OpenPositionWithToken22NftCpi {
-        clmm_program: accounts.clmm_program.to_account_info(),
+    let funding = OpenPositionFundingAccounts {
         payer: accounts.user.to_account_info(),
-        vault: accounts.vault.to_account_info(),
-        position_nft_mint: nft_mint.clone(),
-        position_nft_account: accounts.position_nft_account.to_account_info(),
-        pool_state: accounts.pool_state.to_account_info(),
-        tick_array_lower: accounts.tick_array_lower.to_account_info(),
-        tick_array_upper: accounts.tick_array_upper.to_account_info(),
-        personal_position: accounts.personal_position.to_account_info(),
-        token_account_0: accounts.vault_token_a.to_account_info(),
-        token_account_1: accounts.vault_token_b.to_account_info(),
-        token_vault_0: accounts.token_vault_0.to_account_info(),
-        token_vault_1: accounts.token_vault_1.to_account_info(),
         rent: accounts.rent.to_account_info(),
         system_program: accounts.system_program.to_account_info(),
-        token_program: accounts.token_program.to_account_info(),
         associated_token_program: accounts.associated_token_program.to_account_info(),
-        token_program_2022: accounts.token_2022_program.to_account_info(),
-        vault_0_mint: accounts.mint_a.to_account_info(),
-        vault_1_mint: accounts.mint_b.to_account_info(),
-        tick_array_bitmap_extension: accounts.tick_array_bitmap_extension.to_account_info(),
     };
-    invoke_open_position_with_token22_nft(&cpi, tick_lower, tick_upper, pool.tick_spacing)?;
+    open_empty_position(
+        &position_accounts(accounts),
+        &funding,
+        tick_lower,
+        tick_upper,
+        pool.tick_spacing,
+    )?;
 
-    snapshot_pair_transfer_fees(accounts)?;
+    record_pair_transfer_fees(
+        &mut accounts.vault,
+        &accounts.mint_a.to_account_info(),
+        &accounts.mint_b.to_account_info(),
+    )?;
 
     let position_address = accounts.personal_position.key();
     let vault = &mut accounts.vault;
@@ -445,37 +429,23 @@ fn handle_increase_liquidity(
     token_max_a: u64,
     token_max_b: u64,
 ) -> Result<()> {
-    let balance_before_a = accounts.vault_token_a.amount;
-    let balance_before_b = accounts.vault_token_b.amount;
-    require_raydium_increase_bounds(
+    let seed_bytes = VaultSignerSeedBytes::new(&accounts.vault);
+    let seeds = seed_bytes.seeds();
+    let consumed = increase_liquidity_from_vault(
+        &position_accounts(accounts),
         liquidity_amount,
         token_max_a,
         token_max_b,
-        balance_before_a,
-        balance_before_b,
+        &seeds,
     )?;
-
-    let seed_bytes = VaultSignerSeedBytes::new(&accounts.vault);
-    let seeds = seed_bytes.seeds();
-    let cpi = increase_liquidity_cpi(accounts);
-    invoke_increase_liquidity_v2(&cpi, liquidity_amount, token_max_a, token_max_b, &seeds)?;
-
-    accounts.vault_token_a.reload()?;
-    accounts.vault_token_b.reload()?;
-    let consumed_a = observed_debit(balance_before_a, accounts.vault_token_a.amount)?;
-    let consumed_b = observed_debit(balance_before_b, accounts.vault_token_b.amount)?;
-
-    // Raydium enforces the maxima against the gross debit; re-check the
-    // observed debit so the bound never depends on the CPI alone.
-    require_consumed_within_max(consumed_a, token_max_a)?;
-    require_consumed_within_max(consumed_b, token_max_b)?;
+    reload_vault_atas(accounts)?;
 
     emit!(LiquidityChanged {
         vault: accounts.vault.key(),
         position_address: accounts.personal_position.key(),
         op: LiquidityOp::Increase,
-        amount_a: consumed_a,
-        amount_b: consumed_b,
+        amount_a: consumed.amount_0,
+        amount_b: consumed.amount_1,
         timestamp: Clock::get()?.unix_timestamp,
         triggered_by: TriggeredBy::User,
     });
@@ -500,37 +470,35 @@ fn handle_decrease_liquidity<'info>(
 
     let seed_bytes = VaultSignerSeedBytes::new(&accounts.vault);
     let seeds = seed_bytes.seeds();
+    let vault_position = position_accounts(accounts);
+    let payout = payout_accounts(accounts, rewards);
 
     // 1. Collect first: the principal decrease would otherwise pay out the
-    //    owed LP fees untaxed. Within this instruction no swap can accrue new
-    //    fees, so the second decrease carries principal only.
-    collect_lp_fees_and_route_to_treasury(accounts, rewards, &seeds)?;
+    //    owed LP fees untaxed.
+    collect_lp_fees_to_treasury(
+        &vault_position,
+        &payout,
+        &treasury_accounts(accounts),
+        &seeds,
+    )?;
 
-    // 2. Remove principal. Re-read the ATAs: the fee split just moved tokens.
-    accounts.vault_token_a.reload()?;
-    accounts.vault_token_b.reload()?;
-    let balance_before_a = accounts.vault_token_a.amount;
-    let balance_before_b = accounts.vault_token_b.amount;
-
-    let cpi = decrease_liquidity_cpi(accounts, rewards);
-    invoke_decrease_liquidity_v2(&cpi, liquidity_amount, token_min_a, token_min_b, &seeds)?;
-
-    accounts.vault_token_a.reload()?;
-    accounts.vault_token_b.reload()?;
-    let received_a = observed_credit(balance_before_a, accounts.vault_token_a.amount)?;
-    let received_b = observed_credit(balance_before_b, accounts.vault_token_b.amount)?;
-
-    // Raydium checks the floors against principal net of transfer fee; the
-    // observed ATA credit is the same quantity. Re-check as defence-in-depth.
-    require_principal_meets_min(received_a, token_min_a)?;
-    require_principal_meets_min(received_b, token_min_b)?;
+    // 2. Remove principal, with the min-out floors on the observed credit.
+    let received = decrease_principal_to_vault(
+        &vault_position,
+        &payout,
+        liquidity_amount,
+        token_min_a,
+        token_min_b,
+        &seeds,
+    )?;
+    reload_vault_atas(accounts)?;
 
     emit!(LiquidityChanged {
         vault: accounts.vault.key(),
         position_address: accounts.personal_position.key(),
         op: LiquidityOp::Decrease,
-        amount_a: received_a,
-        amount_b: received_b,
+        amount_a: received.amount_0,
+        amount_b: received.amount_1,
         timestamp: Clock::get()?.unix_timestamp,
         triggered_by: TriggeredBy::User,
     });
@@ -544,7 +512,13 @@ fn handle_collect_fees<'info>(
 ) -> Result<()> {
     let seed_bytes = VaultSignerSeedBytes::new(&accounts.vault);
     let seeds = seed_bytes.seeds();
-    collect_lp_fees_and_route_to_treasury(accounts, rewards, &seeds)
+    collect_lp_fees_to_treasury(
+        &position_accounts(accounts),
+        &payout_accounts(accounts, rewards),
+        &treasury_accounts(accounts),
+        &seeds,
+    )?;
+    reload_vault_atas(accounts)
 }
 
 fn handle_close_position(
@@ -555,17 +529,11 @@ fn handle_close_position(
 
     let seed_bytes = VaultSignerSeedBytes::new(&accounts.vault);
     let seeds = seed_bytes.seeds();
-    let cpi = ClosePositionCpi {
-        clmm_program: accounts.clmm_program.to_account_info(),
-        vault: accounts.vault.to_account_info(),
-        position_nft_mint: accounts.position_nft_mint.to_account_info(),
-        position_nft_account: accounts.position_nft_account.to_account_info(),
-        personal_position: accounts.personal_position.to_account_info(),
-        system_program: accounts.system_program.to_account_info(),
-        token_program_2022: accounts.token_2022_program.to_account_info(),
-        pool_state: accounts.pool_state.to_account_info(),
-    };
-    invoke_close_position(&cpi, &seeds)?;
+    close_empty_position(
+        &position_accounts(accounts),
+        &accounts.system_program.to_account_info(),
+        &seeds,
+    )?;
 
     let position_address = accounts.personal_position.key();
     let vault = &mut accounts.vault;
@@ -589,118 +557,6 @@ fn handle_close_position(
     });
 
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Fee collection
-// ---------------------------------------------------------------------------
-
-/// Zero-liquidity decrease (pays every fee and reward owed into the vault
-/// ATAs), then the performance-fee split on the LP-fee portion only.
-fn collect_lp_fees_and_route_to_treasury<'info>(
-    accounts: &mut ExecuteActionRaydium<'info>,
-    rewards: &[RewardTransferAccounts<'info>],
-    vault_signer_seeds: &[&[u8]],
-) -> Result<()> {
-    let pool_vault_before_0 = read_pool_vault_amount(&accounts.token_vault_0)?;
-    let pool_vault_before_1 = read_pool_vault_amount(&accounts.token_vault_1)?;
-    let vault_ata_before_a = accounts.vault_token_a.amount;
-    let vault_ata_before_b = accounts.vault_token_b.amount;
-
-    let cpi = decrease_liquidity_cpi(accounts, rewards);
-    invoke_decrease_liquidity_v2(
-        &cpi,
-        COLLECT_ONLY_LIQUIDITY,
-        COLLECT_ONLY_MIN_AMOUNT,
-        COLLECT_ONLY_MIN_AMOUNT,
-        vault_signer_seeds,
-    )?;
-
-    accounts.vault_token_a.reload()?;
-    accounts.vault_token_b.reload()?;
-    let epoch = Clock::get()?.epoch;
-    let lp_fee_a = measure_lp_fee_received(
-        &LpFeeLegBalances {
-            pool_vault_before: pool_vault_before_0,
-            pool_vault_after: read_pool_vault_amount(&accounts.token_vault_0)?,
-            vault_ata_before: vault_ata_before_a,
-            vault_ata_after: accounts.vault_token_a.amount,
-        },
-        read_live_transfer_fee(&accounts.mint_a.to_account_info(), epoch)?,
-    )?;
-    let lp_fee_b = measure_lp_fee_received(
-        &LpFeeLegBalances {
-            pool_vault_before: pool_vault_before_1,
-            pool_vault_after: read_pool_vault_amount(&accounts.token_vault_1)?,
-            vault_ata_before: vault_ata_before_b,
-            vault_ata_after: accounts.vault_token_b.amount,
-        },
-        read_live_transfer_fee(&accounts.mint_b.to_account_info(), epoch)?,
-    )?;
-
-    route_performance_fees(accounts, lp_fee_a, lp_fee_b, vault_signer_seeds)
-}
-
-/// Transfer the Aargau share of each LP-fee leg to the treasury ATAs and emit
-/// `FeesClaimed`. Each leg uses the token program that owns its mint.
-fn route_performance_fees(
-    accounts: &ExecuteActionRaydium<'_>,
-    lp_fee_a: u64,
-    lp_fee_b: u64,
-    vault_signer_seeds: &[&[u8]],
-) -> Result<()> {
-    let fee_rate_bps = accounts.protocol_config.fee_rate_bps;
-    let split_a = split_lp_fee(lp_fee_a, fee_rate_bps)?;
-    let split_b = split_lp_fee(lp_fee_b, fee_rate_bps)?;
-    let signer: &[&[&[u8]]] = &[vault_signer_seeds];
-
-    let mint_a = accounts.mint_a.to_account_info();
-    transfer_performance_fee(
-        *mint_a.owner,
-        accounts.vault_token_a.to_account_info(),
-        mint_a.clone(),
-        accounts.treasury_token_a.to_account_info(),
-        accounts.vault.to_account_info(),
-        accounts.mint_a.decimals,
-        split_a.aargau_fee,
-        signer,
-    )?;
-    let mint_b = accounts.mint_b.to_account_info();
-    transfer_performance_fee(
-        *mint_b.owner,
-        accounts.vault_token_b.to_account_info(),
-        mint_b.clone(),
-        accounts.treasury_token_b.to_account_info(),
-        accounts.vault.to_account_info(),
-        accounts.mint_b.decimals,
-        split_b.aargau_fee,
-        signer,
-    )?;
-
-    emit!(FeesClaimed {
-        vault: accounts.vault.key(),
-        gross_a: split_a.gross,
-        gross_b: split_b.gross,
-        aargau_fee_a: split_a.aargau_fee,
-        aargau_fee_b: split_b.aargau_fee,
-        user_net_a: split_a.user_net,
-        user_net_b: split_b.user_net,
-        timestamp: Clock::get()?.unix_timestamp,
-    });
-
-    Ok(())
-}
-
-fn read_pool_vault_amount(pool_vault: &UncheckedAccount<'_>) -> Result<u64> {
-    Ok(read_token_account_view(&pool_vault.to_account_info())?.amount)
-}
-
-fn read_live_transfer_fee(
-    mint: &AccountInfo<'_>,
-    epoch: u64,
-) -> Result<Option<TransferFeeSnapshot>> {
-    let data = mint.try_borrow_data()?;
-    Ok(read_epoch_transfer_fee(&data, epoch))
 }
 
 // ---------------------------------------------------------------------------
@@ -773,70 +629,60 @@ fn require_tick_arrays_bound(
 // CPI assembly
 // ---------------------------------------------------------------------------
 
-fn increase_liquidity_cpi<'info>(
+/// The handler's accounts as the shared position bundle (leg 0 = token A).
+fn position_accounts<'info>(
     accounts: &ExecuteActionRaydium<'info>,
-) -> IncreaseLiquidityV2Cpi<'info> {
-    IncreaseLiquidityV2Cpi {
+) -> RaydiumPositionAccounts<'info> {
+    RaydiumPositionAccounts {
         clmm_program: accounts.clmm_program.to_account_info(),
         vault: accounts.vault.to_account_info(),
-        nft_account: accounts.position_nft_account.to_account_info(),
         pool_state: accounts.pool_state.to_account_info(),
         personal_position: accounts.personal_position.to_account_info(),
+        position_nft_mint: accounts.position_nft_mint.to_account_info(),
+        position_nft_account: accounts.position_nft_account.to_account_info(),
         tick_array_lower: accounts.tick_array_lower.to_account_info(),
         tick_array_upper: accounts.tick_array_upper.to_account_info(),
-        vault_token_0: accounts.vault_token_a.to_account_info(),
-        vault_token_1: accounts.vault_token_b.to_account_info(),
-        token_vault_0: accounts.token_vault_0.to_account_info(),
-        token_vault_1: accounts.token_vault_1.to_account_info(),
+        tick_array_bitmap_extension: accounts.tick_array_bitmap_extension.to_account_info(),
         token_program: accounts.token_program.to_account_info(),
         token_program_2022: accounts.token_2022_program.to_account_info(),
-        vault_0_mint: accounts.mint_a.to_account_info(),
-        vault_1_mint: accounts.mint_b.to_account_info(),
-        tick_array_bitmap_extension: accounts.tick_array_bitmap_extension.to_account_info(),
+        leg_0: PairLegAccounts {
+            mint: accounts.mint_a.to_account_info(),
+            decimals: accounts.mint_a.decimals,
+            vault_ata: accounts.vault_token_a.to_account_info(),
+            pool_vault: accounts.token_vault_0.to_account_info(),
+        },
+        leg_1: PairLegAccounts {
+            mint: accounts.mint_b.to_account_info(),
+            decimals: accounts.mint_b.decimals,
+            vault_ata: accounts.vault_token_b.to_account_info(),
+            pool_vault: accounts.token_vault_1.to_account_info(),
+        },
     }
 }
 
-fn decrease_liquidity_cpi<'a, 'info>(
+fn payout_accounts<'a, 'info>(
     accounts: &ExecuteActionRaydium<'info>,
     rewards: &'a [RewardTransferAccounts<'info>],
-) -> DecreaseLiquidityV2Cpi<'a, 'info> {
-    DecreaseLiquidityV2Cpi {
-        clmm_program: accounts.clmm_program.to_account_info(),
-        vault: accounts.vault.to_account_info(),
-        nft_account: accounts.position_nft_account.to_account_info(),
-        personal_position: accounts.personal_position.to_account_info(),
-        pool_state: accounts.pool_state.to_account_info(),
-        token_vault_0: accounts.token_vault_0.to_account_info(),
-        token_vault_1: accounts.token_vault_1.to_account_info(),
-        tick_array_lower: accounts.tick_array_lower.to_account_info(),
-        tick_array_upper: accounts.tick_array_upper.to_account_info(),
-        vault_token_0: accounts.vault_token_a.to_account_info(),
-        vault_token_1: accounts.vault_token_b.to_account_info(),
-        token_program: accounts.token_program.to_account_info(),
-        token_program_2022: accounts.token_2022_program.to_account_info(),
+) -> PositionPayoutAccounts<'a, 'info> {
+    PositionPayoutAccounts {
         memo_program: accounts.memo_program.to_account_info(),
-        vault_0_mint: accounts.mint_a.to_account_info(),
-        vault_1_mint: accounts.mint_b.to_account_info(),
-        tick_array_bitmap_extension: accounts.tick_array_bitmap_extension.to_account_info(),
-        reward_accounts: rewards,
+        rewards,
     }
 }
 
-/// Record the pair mints' Token-2022 transfer-fee config on the vault, as
-/// the Orca open does.
-fn snapshot_pair_transfer_fees(accounts: &mut ExecuteActionRaydium<'_>) -> Result<()> {
-    let mint_a = accounts.mint_a.to_account_info();
-    let mint_b = accounts.mint_b.to_account_info();
-    let fee_a = read_transfer_fee_snapshot(&mint_a)?;
-    let fee_b = read_transfer_fee_snapshot(&mint_b)?;
+fn treasury_accounts<'info>(accounts: &ExecuteActionRaydium<'info>) -> TreasuryFeeAccounts<'info> {
+    TreasuryFeeAccounts {
+        treasury_ata_0: accounts.treasury_token_a.to_account_info(),
+        treasury_ata_1: accounts.treasury_token_b.to_account_info(),
+        fee_rate_bps: accounts.protocol_config.fee_rate_bps,
+    }
+}
 
-    let vault = &mut accounts.vault;
-    vault.uses_token_2022 = is_token_2022(mint_a.owner) || is_token_2022(mint_b.owner);
-    vault.token_a_transfer_fee_bps = fee_a.transfer_fee_bps;
-    vault.token_a_maximum_fee = fee_a.maximum_fee;
-    vault.token_b_transfer_fee_bps = fee_b.transfer_fee_bps;
-    vault.token_b_maximum_fee = fee_b.maximum_fee;
-    Ok(())
+/// Refresh the typed vault ATAs after a shared operation moved tokens, so
+/// their cached amounts match the account data.
+fn reload_vault_atas(accounts: &mut ExecuteActionRaydium<'_>) -> Result<()> {
+    accounts.vault_token_a.reload()?;
+    accounts.vault_token_b.reload()
 }
 
 // ---------------------------------------------------------------------------
@@ -860,37 +706,6 @@ pub fn raydium_remaining_account_count(
     }
 }
 
-/// The open's NFT mint must be a fresh keypair that signed the transaction:
-/// Raydium creates the mint account itself.
-pub fn is_fresh_position_nft_mint(is_signer: bool, owner: &Pubkey, data_len: usize) -> bool {
-    is_signer && *owner == anchor_lang::system_program::ID && data_len == 0
-}
-
-/// `IncreaseLiquidity` payload bounds: non-zero liquidity, at least one
-/// non-zero maximum, and neither maximum above the vault's balance.
-pub fn require_raydium_increase_bounds(
-    liquidity_amount: u128,
-    token_max_a: u64,
-    token_max_b: u64,
-    vault_balance_a: u64,
-    vault_balance_b: u64,
-) -> Result<()> {
-    require!(liquidity_amount > 0, AargauError::InvalidActionPayload);
-    require!(
-        token_max_a > 0 || token_max_b > 0,
-        AargauError::InvalidActionPayload
-    );
-    require!(
-        token_max_a <= vault_balance_a,
-        AargauError::InsufficientFunds
-    );
-    require!(
-        token_max_b <= vault_balance_b,
-        AargauError::InsufficientFunds
-    );
-    Ok(())
-}
-
 /// `DecreaseLiquidity` payload bounds: non-zero liquidity no larger than the
 /// on-chain position liquidity, and a slippage floor on at least one side
 /// (only `emergency_withdraw` may exit with 0/0).
@@ -910,64 +725,4 @@ pub fn require_raydium_decrease_bounds(
         AargauError::SlippageExceeded
     );
     Ok(())
-}
-
-/// Raydium only closes an empty position; checking the same fields up front
-/// gives a clear error instead of Raydium's `ClosePositionErr`.
-pub fn require_raydium_position_empty(position: &PersonalPositionView) -> Result<()> {
-    let is_empty = position.liquidity == 0
-        && position.token_fees_owed_0 == 0
-        && position.token_fees_owed_1 == 0
-        && position.reward_amounts_owed.iter().all(|owed| *owed == 0);
-    require!(is_empty, AargauError::PositionNotEmpty);
-    Ok(())
-}
-
-/// Tokens that left a vault ATA across a CPI. A balance that grew during a
-/// deposit-style CPI is an accounting inconsistency (`Underflow`).
-pub fn observed_debit(balance_before: u64, balance_after: u64) -> Result<u64> {
-    balance_before
-        .checked_sub(balance_after)
-        .ok_or(error!(AargauError::Underflow))
-}
-
-/// Tokens that arrived in a vault ATA across a CPI (`PostCpiBalanceDecreased`
-/// if it shrank).
-pub fn observed_credit(balance_before: u64, balance_after: u64) -> Result<u64> {
-    balance_after
-        .checked_sub(balance_before)
-        .ok_or(error!(AargauError::PostCpiBalanceDecreased))
-}
-
-/// Max-in check on the observed debit.
-pub fn require_consumed_within_max(consumed: u64, token_max: u64) -> Result<()> {
-    require!(consumed <= token_max, AargauError::SlippageExceeded);
-    Ok(())
-}
-
-/// Min-out check on the observed principal credit.
-pub fn require_principal_meets_min(received: u64, token_min: u64) -> Result<()> {
-    require!(received >= token_min, AargauError::SlippageExceeded);
-    Ok(())
-}
-
-/// One LP-fee leg split between the treasury and the user.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LpFeeSplit {
-    pub gross: u64,
-    pub aargau_fee: u64,
-    pub user_net: u64,
-}
-
-/// Split a received LP fee with `calc_aargau_fee` (rounds down, user favored).
-pub fn split_lp_fee(gross: u64, fee_rate_bps: u16) -> Result<LpFeeSplit> {
-    let aargau_fee = calc_aargau_fee(gross, fee_rate_bps)?;
-    let user_net = gross
-        .checked_sub(aargau_fee)
-        .ok_or(error!(AargauError::FeeExceedsGross))?;
-    Ok(LpFeeSplit {
-        gross,
-        aargau_fee,
-        user_net,
-    })
 }

@@ -277,6 +277,13 @@ mod raydium_layout_tests {
     }
 
     #[test]
+    fn tick_bounds_match_raydium_tick_math() {
+        assert_eq!(RAYDIUM_MIN_TICK, -443_636);
+        assert_eq!(RAYDIUM_MAX_TICK, 443_636);
+        assert_eq!(RAYDIUM_MIN_TICK, -RAYDIUM_MAX_TICK);
+    }
+
+    #[test]
     fn pool_state_offsets() {
         assert_eq!(RAYDIUM_POOL_TOKEN_MINT_0_OFFSET, 73);
         assert_eq!(RAYDIUM_POOL_TOKEN_MINT_1_OFFSET, 105);

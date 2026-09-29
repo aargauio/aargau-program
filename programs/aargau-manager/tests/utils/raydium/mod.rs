@@ -6,4 +6,6 @@ mod lp_fee;
 mod open_position;
 mod personal_position_view;
 mod pool_state_view;
+mod position_guards;
 mod reward_accounts;
+mod vault_position;
