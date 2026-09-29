@@ -233,6 +233,13 @@ pub const RAYDIUM_TICK_ARRAY_BITMAP_EXTENSION_SEED: &[u8] = b"pool_tick_array_bi
 /// Number of ticks packed inside a single Raydium `TickArrayState`.
 pub const RAYDIUM_TICK_ARRAY_SIZE: i32 = 60;
 
+/// Lowest tick a Raydium position bound may use (`tick_math::MIN_TICK`,
+/// inclusive).
+pub const RAYDIUM_MIN_TICK: i32 = -443_636;
+/// Highest tick a Raydium position bound may use (`tick_math::MAX_TICK`,
+/// inclusive).
+pub const RAYDIUM_MAX_TICK: i32 = 443_636;
+
 /// Reward slots in a Raydium pool / position.
 pub const RAYDIUM_REWARD_SLOTS: usize = 3;
 

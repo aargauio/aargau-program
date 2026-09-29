@@ -14,7 +14,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::AargauError;
-use crate::utils::fee::calc_net_after_transfer_fee;
+use crate::utils::fee::{calc_aargau_fee, calc_net_after_transfer_fee};
 use crate::utils::token_2022::TransferFeeSnapshot;
 
 /// Balances around the zero-liquidity decrease, for one side of the pair.
@@ -70,4 +70,25 @@ pub fn measure_lp_fee_received(
         AargauError::LpFeeMeasurementMismatch
     );
     Ok(received)
+}
+
+/// One LP-fee leg split between the treasury and the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LpFeeSplit {
+    pub gross: u64,
+    pub aargau_fee: u64,
+    pub user_net: u64,
+}
+
+/// Split a received LP fee with `calc_aargau_fee` (rounds down, user favored).
+pub fn split_lp_fee(gross: u64, fee_rate_bps: u16) -> Result<LpFeeSplit> {
+    let aargau_fee = calc_aargau_fee(gross, fee_rate_bps)?;
+    let user_net = gross
+        .checked_sub(aargau_fee)
+        .ok_or(error!(AargauError::FeeExceedsGross))?;
+    Ok(LpFeeSplit {
+        gross,
+        aargau_fee,
+        user_net,
+    })
 }
