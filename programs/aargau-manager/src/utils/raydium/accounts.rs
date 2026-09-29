@@ -9,9 +9,11 @@
 
 use anchor_lang::prelude::*;
 
+use anchor_spl::associated_token::get_associated_token_address_with_program_id;
+
 use crate::constants::{
     RAYDIUM_CLMM_PROGRAM_ID, RAYDIUM_POSITION_SEED, RAYDIUM_TICK_ARRAY_BITMAP_EXTENSION_SEED,
-    RAYDIUM_TICK_ARRAY_SEED, RAYDIUM_TICK_ARRAY_SIZE,
+    RAYDIUM_TICK_ARRAY_SEED, RAYDIUM_TICK_ARRAY_SIZE, TOKEN_2022_PROGRAM_ID,
 };
 use crate::errors::AargauError;
 use crate::utils::orca::accounts::floor_div;
@@ -23,6 +25,13 @@ pub fn derive_personal_position_pda(nft_mint: &Pubkey) -> Pubkey {
         &RAYDIUM_CLMM_PROGRAM_ID,
     );
     pda
+}
+
+/// Token-2022 ATA that custodies the position NFT for `nft_owner` (the vault
+/// PDA). `open_position_with_token22_nft` creates the NFT account through the
+/// ATA program, so this is the only address Raydium accepts.
+pub fn derive_position_nft_account(nft_owner: &Pubkey, nft_mint: &Pubkey) -> Pubkey {
+    get_associated_token_address_with_program_id(nft_owner, nft_mint, &TOKEN_2022_PROGRAM_ID)
 }
 
 /// Start tick index of the `TickArrayState` covering `tick`:

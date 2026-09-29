@@ -133,6 +133,21 @@ mod error_code_tests {
         assert_eq!(AargauError::FeeExceedsGross as u32, 1307);
     }
 
+    #[test]
+    fn test_invalid_reward_owner_discriminant() {
+        assert_eq!(AargauError::InvalidRewardOwner as u32, 1308);
+    }
+
+    #[test]
+    fn test_position_not_empty_discriminant() {
+        assert_eq!(AargauError::PositionNotEmpty as u32, 1309);
+    }
+
+    #[test]
+    fn test_lp_fee_measurement_mismatch_discriminant() {
+        assert_eq!(AargauError::LpFeeMeasurementMismatch as u32, 1310);
+    }
+
     // --- Protocol state range: 1400–1499 ---
 
     #[test]

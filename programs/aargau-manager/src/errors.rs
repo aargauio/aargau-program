@@ -106,6 +106,12 @@ pub enum AargauError {
     #[msg("Reward destination is not the vault's associated token account for the reward mint")]
     InvalidRewardOwner = 1308,
 
+    #[msg("Position still holds liquidity, fees or rewards owed — drain it before closing")]
+    PositionNotEmpty = 1309,
+
+    #[msg("LP fee measured from the pool vault outflow is inconsistent with the vault's balance change")]
+    LpFeeMeasurementMismatch = 1310,
+
     // --- Protocol state (1400–1499) ---
     #[msg("Program is paused — only emergency_withdraw, withdraw, and close_vault are allowed")]
     ProgramPaused = 1400,

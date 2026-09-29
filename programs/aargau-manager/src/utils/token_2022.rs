@@ -49,6 +49,9 @@ pub struct TransferFeeSnapshot {
 //   [106..108] newer.transfer_fee_basis_points: u16
 const MINT_EXTENSION_TLV_START: usize = 166;
 const TRANSFER_FEE_CONFIG_EXTENSION_TYPE: u16 = 1;
+const TRANSFER_FEE_OLDER_MAX_FEE_OFFSET: usize = 80;
+const TRANSFER_FEE_OLDER_BPS_OFFSET: usize = 88;
+const TRANSFER_FEE_NEWER_EPOCH_OFFSET: usize = 90;
 const TRANSFER_FEE_NEWER_MAX_FEE_OFFSET: usize = 98;
 const TRANSFER_FEE_NEWER_BPS_OFFSET: usize = 106;
 
@@ -74,6 +77,44 @@ const TRANSFER_HOOK_EXTENSION_TYPE: u16 = 14;
 /// The vault snapshots these values on `OpenPosition` so the fee-transfer
 /// path can account for the deduction the token program applies on transfer.
 pub fn read_transfer_fee_config(mint_data: &[u8]) -> Option<TransferFeeSnapshot> {
+    let body = find_transfer_fee_config_body(mint_data)?;
+    read_transfer_fee_at(
+        body,
+        TRANSFER_FEE_NEWER_MAX_FEE_OFFSET,
+        TRANSFER_FEE_NEWER_BPS_OFFSET,
+    )
+}
+
+/// Read the transfer fee Token-2022 charges on a transfer made at `epoch`:
+/// the newer fee once `epoch >= newer.epoch`, the older one before that
+/// (Token-2022 `TransferFeeConfig::get_epoch_fee`). SPL classic mints and
+/// Token-2022 mints without the extension return `None`. Never panics on
+/// malformed input.
+///
+/// Unlike [`read_transfer_fee_config`] (a conservative snapshot), this is the
+/// exact fee applied inside the current transaction, so callers can convert a
+/// gross transfer amount into what the recipient actually received.
+pub fn read_epoch_transfer_fee(mint_data: &[u8], epoch: u64) -> Option<TransferFeeSnapshot> {
+    let body = find_transfer_fee_config_body(mint_data)?;
+    let newer_epoch = read_body_u64(body, TRANSFER_FEE_NEWER_EPOCH_OFFSET)?;
+    if epoch >= newer_epoch {
+        read_transfer_fee_at(
+            body,
+            TRANSFER_FEE_NEWER_MAX_FEE_OFFSET,
+            TRANSFER_FEE_NEWER_BPS_OFFSET,
+        )
+    } else {
+        read_transfer_fee_at(
+            body,
+            TRANSFER_FEE_OLDER_MAX_FEE_OFFSET,
+            TRANSFER_FEE_OLDER_BPS_OFFSET,
+        )
+    }
+}
+
+/// Body of the first `TransferFeeConfig` TLV entry, if the mint carries one
+/// and it fits inside the buffer.
+fn find_transfer_fee_config_body(mint_data: &[u8]) -> Option<&[u8]> {
     if mint_data.len() <= 165 {
         return None;
     }
@@ -93,30 +134,47 @@ pub fn read_transfer_fee_config(mint_data: &[u8]) -> Option<TransferFeeSnapshot>
             return None;
         }
         if ext_type == TRANSFER_FEE_CONFIG_EXTENSION_TYPE {
-            let body = &mint_data[data_start..data_end];
-            let max_fee_end = TRANSFER_FEE_NEWER_MAX_FEE_OFFSET + 8;
-            let bps_end = TRANSFER_FEE_NEWER_BPS_OFFSET + 2;
-            if body.len() < bps_end {
-                return None;
-            }
-            let maximum_fee = u64::from_le_bytes(
-                body[TRANSFER_FEE_NEWER_MAX_FEE_OFFSET..max_fee_end]
-                    .try_into()
-                    .ok()?,
-            );
-            let transfer_fee_bps = u16::from_le_bytes(
-                body[TRANSFER_FEE_NEWER_BPS_OFFSET..bps_end]
-                    .try_into()
-                    .ok()?,
-            );
-            return Some(TransferFeeSnapshot {
-                transfer_fee_bps,
-                maximum_fee,
-            });
+            return mint_data.get(data_start..data_end);
         }
         cursor = data_end;
     }
     None
+}
+
+/// One `TransferFee` entry (maximum fee + basis points) at the given body
+/// offsets; `None` when the body is too short.
+fn read_transfer_fee_at(
+    body: &[u8],
+    max_fee_offset: usize,
+    bps_offset: usize,
+) -> Option<TransferFeeSnapshot> {
+    let bps_bytes = body.get(bps_offset..bps_offset.checked_add(2)?)?;
+    Some(TransferFeeSnapshot {
+        transfer_fee_bps: u16::from_le_bytes(bps_bytes.try_into().ok()?),
+        maximum_fee: read_body_u64(body, max_fee_offset)?,
+    })
+}
+
+fn read_body_u64(body: &[u8], offset: usize) -> Option<u64> {
+    let bytes = body.get(offset..offset.checked_add(8)?)?;
+    Some(u64::from_le_bytes(bytes.try_into().ok()?))
+}
+
+/// Account-facing form of [`require_v2_transferable_mint`]: SPL classic mints
+/// pass without reading their data.
+pub fn require_v2_transferable_mint_account(mint: &AccountInfo<'_>) -> Result<()> {
+    if !is_token_2022(mint.owner) {
+        return Ok(());
+    }
+    let data = mint.try_borrow_data()?;
+    require_v2_transferable_mint(&data)
+}
+
+/// Account-facing form of [`read_transfer_fee_config`]; zero fee when the
+/// mint has no `TransferFeeConfig`.
+pub fn read_transfer_fee_snapshot(mint: &AccountInfo<'_>) -> Result<TransferFeeSnapshot> {
+    let data = mint.try_borrow_data()?;
+    Ok(read_transfer_fee_config(&data).unwrap_or_default())
 }
 
 /// Reject a mint that carries a Token-2022 extension incompatible with the v2

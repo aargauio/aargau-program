@@ -171,3 +171,47 @@ mod pda_derivation_tests {
         assert_eq!(err_code(&err), aargau_err_code(AargauError::InvalidPool));
     }
 }
+
+mod position_nft_account_tests {
+    use aargau_manager::constants::{SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID};
+    use aargau_manager::utils::raydium::accounts::derive_position_nft_account;
+    use anchor_lang::prelude::Pubkey;
+    use anchor_spl::associated_token::get_associated_token_address_with_program_id;
+
+    fn fixed(byte: u8) -> Pubkey {
+        Pubkey::new_from_array([byte; 32])
+    }
+
+    #[test]
+    fn is_the_token_2022_ata_of_the_owner() {
+        let owner = fixed(0x0A);
+        let nft_mint = fixed(0x0B);
+        assert_eq!(
+            derive_position_nft_account(&owner, &nft_mint),
+            get_associated_token_address_with_program_id(&owner, &nft_mint, &TOKEN_2022_PROGRAM_ID)
+        );
+    }
+
+    #[test]
+    fn differs_from_the_spl_token_ata() {
+        let owner = fixed(0x0A);
+        let nft_mint = fixed(0x0B);
+        assert_ne!(
+            derive_position_nft_account(&owner, &nft_mint),
+            get_associated_token_address_with_program_id(&owner, &nft_mint, &SPL_TOKEN_PROGRAM_ID)
+        );
+    }
+
+    #[test]
+    fn is_bound_to_owner_and_mint() {
+        let account = derive_position_nft_account(&fixed(0x0A), &fixed(0x0B));
+        assert_ne!(
+            account,
+            derive_position_nft_account(&fixed(0x0C), &fixed(0x0B))
+        );
+        assert_ne!(
+            account,
+            derive_position_nft_account(&fixed(0x0A), &fixed(0x0D))
+        );
+    }
+}
